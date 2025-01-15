@@ -36,7 +36,7 @@ def merge_abc_and_drug_data(raw_data_dir):
         if df.columns[0] != "CellLine_ID":
             df.rename(columns={df.columns[0]: "CellLine_ID"}, inplace=True)
 
-    # Merge the data on the CellLine_ID column and sort by CellLine_ID
+    # Merge the data on the CellLine_ID column and sort by CellLine_ID for readability
     return pd.merge(abc_expression, drug_response, on='CellLine_ID', how='inner').sort_values(by='CellLine_ID')
 
 def calculate_correlations(merged_data_path, gene_names):
@@ -102,7 +102,7 @@ def plot_individual_correlations(correlation_df, merged_data, merged_data_path):
         merged_data_path (str): Path to the merged data CSV file.
     """
 
-    # Validate input
+    # Ensure gene column is present in the DataFrame
     if 'Gene' not in correlation_df.columns:
         raise ValueError("The 'Gene' column is missing from correlation_df. Ensure it is included in the DataFrame.")
 
@@ -129,9 +129,9 @@ def plot_individual_correlations(correlation_df, merged_data, merged_data_path):
 
             # Create scatter plot
             drug_cleaned = re.sub(r"\(BRD.*$", "", drug).strip() # Remove the BRD number from the drug name for better readability and fix weird bug with file saving
-            plt.figure(figsize=(8, 6))
+            plt.figure(figsize=(10, 8))
             plt.scatter(valid_drug_response, valid_gene_expression, alpha=0.7, edgecolors='k', s=50)
-            plt.plot(valid_drug_response, slope * valid_drug_response + intercept, color='red', linewidth=2)
+            plt.plot(valid_drug_response, slope * valid_drug_response + intercept, color='red', linewidth=2, linestyle='--')
             plt.xlabel(f'{drug_cleaned} IC50 Value', fontsize=14, fontweight='bold')
             plt.ylabel(f'{gene} Expression', fontsize=14, fontweight='bold')
             plt.title(f'{gene} vs {drug_cleaned}', fontsize=16, fontweight='bold')
@@ -179,7 +179,7 @@ try:
         print(f"Merged data saved to {merged_data_path}")
 
     # Perform correlation calculations
-    gene_names = ['ABCB1', 'ABCG2', 'ABCC1', 'ABCC2', 'ABCC3', 'ABCC4']
+    gene_names = ['ABCB1', 'ABCG2', 'ABCC1', 'ABCC2', 'ABCC3', 'ABCC4'] # Gene names give in Batch_corrected_Expression_Public_24Q4_subsetted_ABC.csv
     calculate_correlations(merged_data_path, gene_names)
 
 except (FileNotFoundError, ValueError) as e:
