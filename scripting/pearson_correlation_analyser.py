@@ -70,17 +70,23 @@ class PearsonCorrelationAnalyzer:
                         })
 
                 # Handle numeric columns
-                # Check for low variability in drug properties (standard deviation < 0.1)
+                # Use Coefficient of Variation (CV) to assess variability
                 elif values.dtype in [np.float64, np.int64]:
-                    std_dev, mean = values.std(), values.mean()
-                    if std_dev < 0.1:
-                        results.append({
-                            "Property": column,
-                            "Category": category,
-                            "Mean": mean,
-                            "Standard Deviation": std_dev,
-                            "Significance": "Low Variability"
-                        })
+                    mean = values.mean()
+                    std_dev = values.std()
+
+                    # Calculate CV and determine significance
+                    if mean != 0:  # Avoid division by zero
+                        cv = std_dev / mean
+                        if abs(cv) <= 0.1:  # Example threshold for low variability
+                            results.append({
+                                "Property": column,
+                                "Category": category,
+                                "Mean": mean,
+                                "Standard Deviation": std_dev,
+                                "Coefficient of Variation": cv,
+                                "Significance": "Low Variability (CV <= 0.1)"
+                            })
 
         # Save analysis results for both categories in a single file
         analysis_output_file = os.path.join(output_directory, f"{self.gene_name}_significant_properties.csv")

@@ -14,7 +14,6 @@ from scripting import mainScript
 from scripting import gene_tab
 from scripting import pearson_correlation_analyser
 
-
 class AnalysisThread(QThread):
     progress = pyqtSignal(str)  # Signal to send progress updates to the UI
     finished = pyqtSignal(str)  # Signal to indicate completion
