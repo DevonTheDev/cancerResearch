@@ -65,9 +65,11 @@ class AnalysisThread(QThread):
             # Analyze and save top and bottom drugs
             self.progress.emit("Analyzing top and bottom drugs...")
             for gene_name in self.gene_names:
+                self.progress.emit(f"Analyzing gene: {gene_name}")
                 analyzer = pearson_correlation_analyser.PearsonCorrelationAnalyzer(correlation_results_path, gene_name)
                 output_directory = os.path.join(correlation_results_path, "top_bottom_results")
                 analyzer.save_top_bottom_drugs(output_directory)
+                
 
             self.progress.emit("Top and bottom drug analysis completed.")
 
