@@ -55,9 +55,9 @@ class GeneTab(QWidget):
                 item = QTableWidgetItem(str(value) if col_index != 2 else "")
                 if col_index == 2:  # Pearson_Correlation column (numeric sorting)
                     item.setData(Qt.EditRole, float(value))
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable) # Make all cells read-only
 
-                # Apply row color
+                # Apply alternating row colors
                 if row_index % 2 == 0:
                     item.setBackground(QBrush(QColor("#e6f7ff")))  # Light blue for alternating rows
                 else:
