@@ -7,12 +7,11 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 import os
 import pandas as pd
 import traceback
-import rdkit
-import py3Dmol
 
 from scripting import mainScript
 from scripting import gene_tab
 from scripting import pearson_correlation_analyser
+from scripting.file_manager import OrderedFolderCreator
 
 class AnalysisThread(QThread):
     progress = pyqtSignal(str)  # Signal to send progress updates to the UI
@@ -23,6 +22,13 @@ class AnalysisThread(QThread):
         self.raw_data_dir = raw_data_dir
         self.gene_names = gene_names
 
+        # Remove the index file for each run to reset folder numbering by file_manager
+        index_file = "folder_index.json"
+        if os.path.exists(index_file):
+            os.remove(index_file)
+
+        self.folder_creator = OrderedFolderCreator() # Create an instance of OrderedFolderCreator for folder creation
+
     def run(self):
         try:
             base_dir = os.path.dirname(self.raw_data_dir)
@@ -31,8 +37,9 @@ class AnalysisThread(QThread):
             # Ensure directories exist
             os.makedirs(processed_data_dir, exist_ok=True)
 
-            # Paths for merged data and drug data
-            merged_data_path = os.path.join(processed_data_dir, "merged_data.csv")
+            # Create ordered folders and define file paths
+            merged_data_folder = self.folder_creator.create_folder(processed_data_dir, "merged_data")
+            merged_data_path = os.path.join(merged_data_folder, "merged_data.csv")
             drug_data_path = os.path.join(self.raw_data_dir, "drug_id2_PD.csv")
 
             # Check if merged data file already exists
@@ -53,23 +60,20 @@ class AnalysisThread(QThread):
                 self.progress.emit("Error: 'drug_id2_PD.csv' file is missing.")
                 return
 
-            # Check if correlation results already exist
-            correlation_results_path = os.path.join(processed_data_dir, "pearson_correlations")
-            if os.path.exists(correlation_results_path):
-                self.progress.emit(f"Correlation results already exist at {correlation_results_path}. Skipping calculations.")
-            else:
-                self.progress.emit("Calculating correlations...")
-                # Calculate correlations using the mainScript module
-                mainScript.calculate_correlations(merged_data_path, drug_data_path, self.gene_names)
+            # Create folder for correlation results
+            correlation_results_folder = self.folder_creator.create_folder(processed_data_dir, "pearson_correlations")
+
+            # Calculate correlations
+            self.progress.emit("Calculating correlations...")
+            merged_properties_path = mainScript.calculate_correlations(merged_data_path, drug_data_path, self.gene_names, correlation_results_folder, self.folder_creator)
 
             # Analyze and save top and bottom drugs
             self.progress.emit("Analyzing top and bottom drugs...")
+            output_directory = self.folder_creator.create_folder(processed_data_dir, "gene_top_bottom_results")
             for gene_name in self.gene_names:
                 self.progress.emit(f"Analyzing gene: {gene_name}")
-                analyzer = pearson_correlation_analyser.PearsonCorrelationAnalyzer(correlation_results_path, gene_name)
-                output_directory = os.path.join(correlation_results_path, "top_bottom_results")
+                analyzer = pearson_correlation_analyser.PearsonCorrelationAnalyzer(merged_properties_path, gene_name)
                 analyzer.save_top_bottom_drugs(output_directory)
-                
 
             self.progress.emit("Top and bottom drug analysis completed.")
 
@@ -225,7 +229,7 @@ class GeneDrugApp(QMainWindow):
             return raw_data_dir
         except Exception as e:
             return None
-        
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     ex = GeneDrugApp()

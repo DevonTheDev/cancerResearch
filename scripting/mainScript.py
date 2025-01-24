@@ -2,7 +2,6 @@ import os
 import pandas as pd
 from scipy.stats import pearsonr
 import matplotlib.pyplot as plt
-import re
 import numpy as np
 
 def merge_abc_and_drug_data(raw_data_dir):
@@ -38,7 +37,7 @@ def merge_abc_and_drug_data(raw_data_dir):
     # Merge and sort
     return pd.merge(abc_expression, drug_response, on='CellLine_ID', how='inner').sort_values(by='CellLine_ID')
 
-def calculate_correlations(merged_data_path, drug_data_path, gene_names):
+def calculate_correlations(merged_data_path, drug_data_path, gene_names, output_dir, folder_creator):
     """
     Calculates Pearson correlation coefficients between gene expressions and IC50 values for each drug,
     saves the results and merges with drug properties.
@@ -47,8 +46,12 @@ def calculate_correlations(merged_data_path, drug_data_path, gene_names):
         merged_data_path (str): Path to the merged data CSV file.
         drug_data_path (str): Path to the drug properties data CSV file.
         gene_names (list): List of gene names to calculate correlations for.
+        output_dir (str): Path to the output directory to save results.
+        folder_creator (OrderedFolderCreator): Instance of OrderedFolderCreator for creating folders.
     """
     # Load data
+    parent_dir = os.path.abspath(os.path.join(output_dir, os.pardir))
+    print(parent_dir)
     merged_data = pd.read_csv(merged_data_path)
     drug_properties = pd.read_csv(drug_data_path)
 
@@ -66,9 +69,7 @@ def calculate_correlations(merged_data_path, drug_data_path, gene_names):
         if (data := merged_data[[gene, drug]].dropna()).shape[0] >= 2
     ]
 
-    # Save and merge results
-    output_dir = os.path.join(os.path.dirname(merged_data_path), "pearson_correlations")
-    os.makedirs(output_dir, exist_ok=True)
+    merged_properties_path = folder_creator.create_folder(parent_dir, "properties_merged")
 
     for gene in gene_names:
         gene_df = pd.DataFrame([res for res in all_gene_results if res['Gene'] == gene])
@@ -77,55 +78,8 @@ def calculate_correlations(merged_data_path, drug_data_path, gene_names):
             gene_df.sort_values(by='Pearson_Correlation', ascending=False, inplace=True)
             gene_df.to_csv(os.path.join(output_dir, f"{gene}_pearson_correlations.csv"), index=False)
 
-            # Merge with drug properties
             merged_properties = pd.merge(gene_df, drug_properties, on='id', how='inner').sort_values(by='Pearson_Correlation')
-            merged_properties.to_csv(os.path.join(output_dir, f"{gene}_properties_merged.csv"), index=False)
+            merged_properties.to_csv(os.path.join(merged_properties_path, f"{gene}_properties_merged.csv"), index=False)
             print(f"Saved results for {gene}")
 
-# Main script
-if __name__ == "__main__":
-    try:
-        # Define base paths
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        raw_data_dir = os.path.join(script_dir, "Raw Data")
-        processed_data_dir = os.path.join(script_dir, "Processed_Data")
-
-        # Ensure directories exist
-        for directory in [raw_data_dir, processed_data_dir]:
-            os.makedirs(directory, exist_ok=True)
-
-        # Define file paths
-        merged_data_path = os.path.join(processed_data_dir, "merged_data.csv")
-        drug_data_path = os.path.join(raw_data_dir, "drug_id2_PD.csv")
-
-        # Validate Raw Data directory and files
-        required_files = [
-            os.path.join(raw_data_dir, "Batch_corrected_Expression_Public_24Q4_subsetted_ABC.csv"),
-            os.path.join(raw_data_dir, "PRISM_Repurposing_Public_24Q2_subsetted.csv"),
-            drug_data_path
-        ]
-        for file_path in required_files:
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"Required file not found: {file_path}")
-
-        # Merge data if necessary
-        if not os.path.exists(merged_data_path):
-            print(f"Merged data file not found. Creating at {merged_data_path}...")
-            merged_data = merge_abc_and_drug_data(raw_data_dir)
-            merged_data.to_csv(merged_data_path, index=False)
-            print(f"Merged data saved to {merged_data_path}")
-
-        # Perform correlation calculations
-        gene_names = ['ABCB1', 'ABCG2', 'ABCC1', 'ABCC2', 'ABCC3', 'ABCC4']
-        calculate_correlations(merged_data_path, drug_data_path, gene_names)
-
-        # Ensure directories exist
-        for directory in [processed_data_dir]:
-            os.makedirs(directory, exist_ok=True)
-
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Error: {e}")
-        exit(1)
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        exit(1)
+    return merged_properties_path
