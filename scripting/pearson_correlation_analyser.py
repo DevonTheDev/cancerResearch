@@ -1,8 +1,7 @@
 import os
-from tokenize import group
 import pandas as pd
 import numpy as np
-from scipy.stats import pearsonr
+from scipy.stats import ttest_ind, zscore, mannwhitneyu, shapiro, fisher_exact, chi2_contingency, anderson
 
 class PearsonCorrelationAnalyzer:
     def __init__(self, processed_data_dir, gene_name):
@@ -10,26 +9,29 @@ class PearsonCorrelationAnalyzer:
         self.gene_name = gene_name
 
     def get_file_path(self):
+        """Generates the file path for the gene properties file."""
         return os.path.join(self.processed_data_dir, f"{self.gene_name}_properties_merged.csv")
 
     def save_top_bottom_drugs(self, output_directory):
+        """Saves the top 10 and bottom 10 drugs based on Pearson Correlation to a CSV file."""
         file_path = self.get_file_path()
 
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
         data = pd.read_csv(file_path)
-        if "Drug" not in data.columns or "Pearson_Correlation" not in data.columns:
-            raise ValueError("Required columns ('Drug', 'Pearson_Correlation') are missing in the file.")
+        required_columns = {"Drug", "Pearson_Correlation"}
+        if not required_columns.issubset(data.columns):
+            raise ValueError(f"Required columns {required_columns} are missing in the file.")
 
-        # Sort the data by Pearson_Correlation
+        # Sort the data by Pearson Correlation
         sorted_data = data.sort_values(by="Pearson_Correlation", ascending=False)
 
-        # Extract top 10 and bottom 10
+        # Extract top 10 and bottom 10 entries
         top_10 = sorted_data.head(10)
         bottom_10 = sorted_data.tail(10)
 
-        # Combine into one DataFrame with separate columns for Top and Bottom
+        # Combine the results into a single DataFrame
         combined_results = pd.DataFrame({
             "Top_10_Drug": top_10["Drug"].reset_index(drop=True),
             "Top_10_Correlation": top_10["Pearson_Correlation"].reset_index(drop=True),
@@ -37,44 +39,90 @@ class PearsonCorrelationAnalyzer:
             "Bottom_10_Correlation": bottom_10["Pearson_Correlation"].reset_index(drop=True),
         })
 
-        # Save to a single CSV file
+        # Ensure the output directory exists
         os.makedirs(output_directory, exist_ok=True)
         output_file = os.path.join(output_directory, f"{self.gene_name}_top_bottom_drugs.csv")
         combined_results.to_csv(output_file, index=False)
         print(f"Top and bottom 10 drugs saved to {output_file}")
 
-        # Analyze properties for significance
-        self.analyze_properties(top_10, bottom_10, output_directory)
+        # Analyze properties for significant differences
+        self.analyze_properties(data, top_10, bottom_10, output_directory)
 
-    def analyze_properties(self, top_10, bottom_10, output_directory):
-        """
-        Analyzes the properties of the top and bottom drugs separately and compares them.
-        """
-        results = []
-        for category, group in [("Top 10", top_10), ("Bottom 10", bottom_10)]:
-            properties = group.iloc[:, 15:]
+    def analyze_properties(self, all_drugs, top_10, bottom_10, output_directory):
+        """Analyzes the properties of top and bottom drugs and compares them to the rest, as well as to each other."""
+        top_10_results = []
+        bottom_10_results = []
+        comparison_results = []
+
+        # Combine all comparisons (Top 10 vs rest, Bottom 10 vs rest, and Top 10 vs Bottom 10)
+        for category, group, comparison_group in [
+            ("Top 10", top_10, all_drugs[~all_drugs["Drug"].isin(top_10["Drug"])]),
+            ("Bottom 10", bottom_10, all_drugs[~all_drugs["Drug"].isin(bottom_10["Drug"])]),
+            ("Top 10 vs Bottom 10", top_10, bottom_10)
+        ]:
+            properties = group.iloc[:, 15:].dropna(axis=1, how="all")  # Drop columns with all NaN values
 
             for column in properties.columns:
-                values = properties[column].dropna()
+                group_values = group[column].dropna()
+                comparison_values = comparison_group[column].dropna()
 
-                # Use Coefficient of Variation (CV) to assess variability
-                if values.dtype in [np.float64, np.int64]: # Only numeric columns
-                    mean = values.mean()
-                    std_dev = values.std()
+                # Remove non-finite values (NaN, inf, -inf)
+                group_values = group_values[np.isfinite(group_values)]
+                comparison_values = comparison_values[np.isfinite(comparison_values)]
 
-                    # Calculate CV and determine significance
-                    if mean != 0:  # Avoid division by zero
-                        cv = std_dev / mean
-                        if abs(cv) <= 0.2 and abs(cv) != 0:  # Threshold for significant values, abs because CV can be negative
-                            results.append({
+                # Skip properties with insufficient variation or no valid data left
+                if (group_values.nunique() <= 1) or (comparison_values.nunique() <= 1) or group_values.empty or comparison_values.empty:
+                    continue
+
+                if np.issubdtype(group_values.dtype, np.number):
+                    # Clip extreme values to prevent numeric errors
+                    group_values = np.clip(group_values, -1e10, 1e10)
+                    comparison_values = np.clip(comparison_values, -1e10, 1e10)
+
+                    try:
+                        group_normality = anderson(group_values).statistic < 1.0
+                        comparison_normality = anderson(comparison_values).statistic < 1.0
+                    except Exception as e:
+                        print(f"Error in normality test for column '{column}': {e}")
+                        group_normality, comparison_normality = False, False
+
+                    try:
+                        if group_normality and comparison_normality:
+                            test_type = "t-test"
+                            t_stat, p_value = ttest_ind(group_values, comparison_values, equal_var=False, nan_policy='omit')
+                        else:
+                            test_type = "Mann-Whitney U"
+                            t_stat, p_value = mannwhitneyu(group_values, comparison_values, alternative='two-sided')
+
+                        if p_value < 0.05:
+                            result = {
                                 "Property": column,
                                 "Category": category,
-                                "Mean": mean,
-                                "Standard Deviation": std_dev,
-                                "Coefficient of Variation": cv,
-                            })
+                                "Test Type": test_type,
+                                "T-Statistic": t_stat,
+                                "P-Value": p_value,
+                                "Group Mean": group_values.mean(),
+                                "Comparison Mean": comparison_values.mean(),
+                            }
 
-        # Save analysis results for both categories in a single file
-        analysis_output_file = os.path.join(output_directory, f"{self.gene_name}_significant_properties.csv")
-        pd.DataFrame(results).to_csv(analysis_output_file, index=False)
-        print(f"Significant property analysis saved to {analysis_output_file}")
+                            if (category == "Top 10"):
+                                top_10_results.append(result)
+                            elif (category == "Bottom 10"):
+                                bottom_10_results.append(result)
+                            else:
+                                comparison_results.append(result)
+
+                    except Exception as e:
+                        print(f"Error in statistical test for column '{column}': {e}")
+
+        # Sort each result by P-value, then concat for saving to csv
+        top_10_results_df = pd.DataFrame(top_10_results).sort_values(by="P-Value", ascending=True)
+        bottom_10_results_df = pd.DataFrame(bottom_10_results).sort_values(by="P-Value", ascending=True)
+        comparison_results_df = pd.DataFrame(comparison_results).sort_values(by="P-Value", ascending=True)
+
+        results_df = pd.concat([top_10_results_df, bottom_10_results_df, comparison_results_df], ignore_index=True)
+
+        # Save results to CSV
+        output_file = os.path.join(output_directory, f"{self.gene_name}_properties_analysis.csv")
+        results_df.to_csv(output_file, index=False)
+        print(f"Property analysis saved to {output_file}")
