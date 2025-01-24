@@ -81,3 +81,5 @@ def calculate_correlations(merged_data_path, drug_data_path, gene_names, output_
             merged_properties = pd.merge(gene_df, drug_properties, on='id', how='inner').sort_values(by='Pearson_Correlation')
             merged_properties.to_csv(os.path.join(merged_properties_path, f"{gene}_properties_merged.csv"), index=False)
             print(f"Saved results for {gene}")
+
+    return merged_properties_path

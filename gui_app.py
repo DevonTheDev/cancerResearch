@@ -65,14 +65,14 @@ class AnalysisThread(QThread):
 
             # Calculate correlations
             self.progress.emit("Calculating correlations...")
-            mainScript.calculate_correlations(merged_data_path, drug_data_path, self.gene_names, correlation_results_folder, self.folder_creator)
+            merged_properties_path = mainScript.calculate_correlations(merged_data_path, drug_data_path, self.gene_names, correlation_results_folder, self.folder_creator)
 
             # Analyze and save top and bottom drugs
             self.progress.emit("Analyzing top and bottom drugs...")
             output_directory = self.folder_creator.create_folder(processed_data_dir, "gene_top_bottom_results")
             for gene_name in self.gene_names:
                 self.progress.emit(f"Analyzing gene: {gene_name}")
-                analyzer = pearson_correlation_analyser.PearsonCorrelationAnalyzer(correlation_results_folder, gene_name)
+                analyzer = pearson_correlation_analyser.PearsonCorrelationAnalyzer(merged_properties_path, gene_name)
                 analyzer.save_top_bottom_drugs(output_directory)
 
             self.progress.emit("Top and bottom drug analysis completed.")
