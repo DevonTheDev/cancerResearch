@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QTextEdit, QWidget, QTabWidget
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from glob import glob
 
 from scripting import mainScript
 from scripting import gene_tab
@@ -126,16 +127,31 @@ class GeneDrugApp(QMainWindow):
     def setup_data_tab(self):
         self.data_tab = QWidget()
         self.tabs.addTab(self.data_tab, "View Pearson Correlations")
+        
+        self.properties_tab = QWidget()
+        self.tabs.addTab(self.properties_tab, "View Properties Analysis")
 
-        layout = QVBoxLayout()
-        self.data_tab.setLayout(layout)
+        # Pearson Correlations Tab Layout
+        data_layout = QVBoxLayout()
+        self.data_tab.setLayout(data_layout)
 
-        self.subtabs = QTabWidget()
-        layout.addWidget(self.subtabs)
+        self.pearson_subtabs = QTabWidget()
+        data_layout.addWidget(self.pearson_subtabs)
 
         self.load_data_button = QPushButton("Load Pearson Correlations")
         self.load_data_button.clicked.connect(self.load_pearson_correlations)
-        layout.addWidget(self.load_data_button)
+        data_layout.addWidget(self.load_data_button)
+
+        # Properties Analysis Tab Layout
+        properties_layout = QVBoxLayout()
+        self.properties_tab.setLayout(properties_layout)
+
+        self.properties_subtabs = QTabWidget()
+        properties_layout.addWidget(self.properties_subtabs)
+
+        self.load_properties_button = QPushButton("Load Properties Analysis")
+        self.load_properties_button.clicked.connect(self.load_properties_analysis)
+        properties_layout.addWidget(self.load_properties_button)
 
     def select_raw_data_dir(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Directory")
@@ -168,26 +184,80 @@ class GeneDrugApp(QMainWindow):
                 return
 
             base_dir = os.path.dirname(self.raw_data_dir)
-            processed_data_dir = os.path.join(base_dir, "Processed_Data", "pearson_correlations")
 
+            # Search for the "pearson_correlations" folder
+            pearson_folders = glob(os.path.join(base_dir, "Processed_Data", "*pearson_correlations*"))
+            if not pearson_folders:
+                self.output_label.setText("Error: No folder found containing 'pearson_correlations'.")
+                return
+
+            # Use the first matching folder (if multiple are found)
+            processed_data_dir = pearson_folders[0]
+
+            # Get gene names from input
             gene_names = [gene.strip() for gene in self.gene_names_input.toPlainText().split(",")]
 
             for gene in gene_names:
-                file_path = os.path.join(processed_data_dir, f"{gene}_pearson_correlations.csv")
-                if os.path.exists(file_path):
-                    data_frame = pd.read_csv(file_path)
-                    data_frame.sort_values(by="Pearson_Correlation", ascending=False, inplace=True)
-                    self.add_gene_tab(gene, data_frame)
-                else:
-                    self.output_label.setText(f"File not found for gene: {gene}")
+                # Search for CSV files matching the gene name within the pearson_correlations folder
+                pattern = os.path.join(processed_data_dir, f"*{gene}*.csv")
+                matching_files = glob(pattern)
 
+                if matching_files:  # If matching files are found
+                    for file_path in matching_files:
+                        data_frame = pd.read_csv(file_path)
+                        data_frame.sort_values(by="Pearson_Correlation", ascending=False, inplace=True)
+                        self.add_gene_tab(gene, data_frame)
+                else:
+                    self.output_label.setText(f"No file found for gene: {gene} in folder: {processed_data_dir}")
+
+        except Exception as e:
+            self.output_label.setText(f"Error loading data: {str(e)}")
+            print(traceback.format_exc())
+
+    def load_properties_analysis(self):
+        try:
+            if not hasattr(self, "raw_data_dir") or not self.raw_data_dir:
+                self.output_label.setText("Error: Please select a raw data directory.")
+                return
+            
+            base_dir = os.path.dirname(self.raw_data_dir)
+
+            # Search for gene_top_bottom_results folder
+            properties_folders = glob(os.path.join(base_dir, "Processed_Data", "*gene_top_bottom_results*"))
+            if not properties_folders:
+                self.output_label.setText("Error: No folder found containing 'gene_top_bottom_results'.")
+                return
+            
+            # Use the first matching folder (if multiple are found)
+            processed_data_dir = properties_folders[0]
+
+            # Get gene names from input
+            gene_names = [gene.strip() for gene in self.gene_names_input.toPlainText().split(",")]
+
+            for gene in gene_names:
+                # Search for CSV files matching the gene name within the gene_top_bottom_results folder
+                pattern = os.path.join(processed_data_dir, f"*{gene}*_properties_analysis.csv")
+                matching_files = glob(pattern)
+
+                if matching_files:
+                    for file_path in matching_files:
+                        data_frame = pd.read_csv(file_path)
+                        data_frame.sort_values(by="Effect Size", ascending=False, inplace=True)
+                        self.add_properties_tab(gene, data_frame)
+                else:
+                    self.output_label.setText(f"No file found for gene: {gene} in folder: {processed_data_dir}")
+        
         except Exception as e:
             self.output_label.setText(f"Error loading data: {str(e)}")
             print(traceback.format_exc())
 
     def add_gene_tab(self, gene, data_frame):
         gene_tab_widget = gene_tab.GeneTab(gene, data_frame)
-        self.subtabs.addTab(gene_tab_widget, gene)
+        self.pearson_subtabs.addTab(gene_tab_widget, gene)
+
+    def add_properties_tab(self, gene, data_frame):
+        gene_tab_widget = gene_tab.PropertiesTab(gene, data_frame)
+        self.properties_subtabs.addTab(gene_tab_widget, gene)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

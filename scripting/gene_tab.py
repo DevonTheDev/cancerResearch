@@ -3,13 +3,11 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QColor, QBrush, QFont
 from PyQt5.QtCore import Qt
-from scripting import drug_info
+import numpy as np
 
-
-class GeneTab(QWidget):
-    def __init__(self, gene, data_frame):
+class BaseTab(QWidget):
+    def __init__(self, data_frame):
         super().__init__()
-        self.gene = gene
         self.data_frame = data_frame
         self.initUI()
 
@@ -24,7 +22,39 @@ class GeneTab(QWidget):
         self.table.horizontalHeader().setFont(QFont("Arial", 10, QFont.Bold))
         self.table.verticalHeader().setVisible(False)  # Hide row numbers
         self.table.setAlternatingRowColors(True)
-        self.table.setStyleSheet("""
+        self.table.setStyleSheet(self.get_table_stylesheet())
+
+        # Populate table and finalize
+        self.populate_table()
+        self.table.setSortingEnabled(True)
+        self.table.resizeColumnsToContents()
+
+    def populate_table(self):
+        # Dynamically determine numeric columns
+        numeric_column_indexes = [
+            i for i, dtype in enumerate(self.data_frame.dtypes) if np.issubdtype(dtype, np.number)
+        ]
+
+        for row_index, row_data in self.data_frame.iterrows():
+            for col_index, value in enumerate(row_data):
+                item = QTableWidgetItem(str(value))
+                if col_index in numeric_column_indexes:  # Numeric sorting of numeric columns
+                    try:
+                        item.setData(Qt.EditRole, float(value))
+                    except ValueError:
+                        item.setData(Qt.EditRole, 0.0)  # Fallback value for non-convertible data
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make all cells read-only
+
+                # Apply alternating row colors
+                color = QColor("#e6f7ff") if row_index % 2 == 0 else QColor("#ffffff")
+                item.setBackground(QBrush(color))
+
+                self.table.setItem(row_index, col_index, item)
+
+    @staticmethod
+    def get_table_stylesheet():
+        """Returns the shared stylesheet for the table."""
+        return """
             QTableWidget {
                 gridline-color: #ccc;
                 font-family: Arial;
@@ -41,31 +71,16 @@ class GeneTab(QWidget):
             QTableWidget::item {
                 padding: 5px;
             }
-        """)
+        """
 
-        # Populate table and finalize
-        self.populate_table()
-        self.table.setSortingEnabled(True)
-        self.table.resizeColumnsToContents()
-        self.table.cellDoubleClicked.connect(self.onRowDoubleClicked)
 
-    def populate_table(self):
-        for row_index, row_data in self.data_frame.iterrows():
-            for col_index, value in enumerate(row_data):
-                item = QTableWidgetItem(str(value) if col_index != 2 else "")
-                if col_index == 2:  # Pearson_Correlation column (numeric sorting)
-                    item.setData(Qt.EditRole, float(value))
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable) # Make all cells read-only
+class GeneTab(BaseTab):
+    def __init__(self, gene, data_frame):
+        self.gene = gene
+        super().__init__(data_frame)
 
-                # Apply alternating row colors
-                if row_index % 2 == 0:
-                    item.setBackground(QBrush(QColor("#e6f7ff")))  # Light blue for alternating rows
-                else:
-                    item.setBackground(QBrush(QColor("#ffffff")))  # White for regular rows
 
-                self.table.setItem(row_index, col_index, item)
-
-    def onRowDoubleClicked(self, row, col):
-        gene_name = self.table.item(row, 0).text()
-        drug_id = self.table.item(row, 3).text()
-        drug_info.DrugInfo().onRowDoubleClicked(gene_name, drug_id)
+class PropertiesTab(BaseTab):
+    def __init__(self, gene, data_frame):
+        self.gene = gene
+        super().__init__(data_frame)
