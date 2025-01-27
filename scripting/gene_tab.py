@@ -1,9 +1,11 @@
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
+    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QPushButton, QDialog
 )
 from PyQt5.QtGui import QColor, QBrush, QFont
 from PyQt5.QtCore import Qt
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 class BaseTab(QWidget):
     def __init__(self, data_frame):
@@ -37,12 +39,16 @@ class BaseTab(QWidget):
 
         for row_index, row_data in self.data_frame.iterrows():
             for col_index, value in enumerate(row_data):
-                item = QTableWidgetItem(str(value))
-                if col_index in numeric_column_indexes:  # Numeric sorting of numeric columns
-                    try:
-                        item.setData(Qt.EditRole, float(value))
-                    except ValueError:
-                        item.setData(Qt.EditRole, 0.0)  # Fallback value for non-convertible data
+                item = QTableWidgetItem()
+                try:
+                    if col_index in numeric_column_indexes:  # Numeric sorting for numeric columns
+                        item.setData(Qt.EditRole, float(value))  # Properly set numeric data
+                    else:
+                        item.setData(Qt.EditRole, str(value))  # For non-numeric columns, use string data
+                except ValueError:
+                    item.setData(Qt.EditRole, 0.0)  # Fallback value for non-convertible data
+
+                item.setText(str(value))  # Set the display text for the cell
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make all cells read-only
 
                 # Apply alternating row colors
@@ -84,3 +90,61 @@ class PropertiesTab(BaseTab):
     def __init__(self, gene, data_frame):
         self.gene = gene
         super().__init__(data_frame)
+
+    def initUI(self):
+        layout = QVBoxLayout(self)
+
+        # Add a button above the table
+        self.button = QPushButton("View Volcano Plot", self)
+        self.button.setStyleSheet("font-size: 12pt; padding: 5px; background-color: #bdbdbd; color: black;")
+        self.button.clicked.connect(self.show_volcano_plot)
+        layout.addWidget(self.button)
+
+        self.table = QTableWidget(len(self.data_frame), len(self.data_frame.columns))
+        layout.addWidget(self.table)
+
+        # Set up table headers and appearance
+        self.table.setHorizontalHeaderLabels(self.data_frame.columns)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.horizontalHeader().setFont(QFont("Arial", 10, QFont.Bold))
+        self.table.verticalHeader().setVisible(False)  # Hide row numbers
+        self.table.setAlternatingRowColors(True)
+        self.table.setStyleSheet(self.get_table_stylesheet())
+
+        # Populate table and finalize
+        self.populate_table()
+        self.table.setSortingEnabled(True)
+        self.table.resizeColumnsToContents()
+
+    def show_volcano_plot(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Volcano Plot for {self.gene}")
+        dialog.resize(800, 600)
+
+        layout = QVBoxLayout(dialog)
+
+        # Separate data by Test Type
+        test_types = {
+            "t-test": {"color": "blue", "title": "Cohen's d Volcano Plot"},
+            "Mann-Whitney U": {"color": "green", "title": "Rank-Biserial Correlation Volcano Plot"}
+        }
+
+        for test_type, properties in test_types.items():
+            data = self.data_frame[self.data_frame["Test Type"] == test_type]
+            if data.empty:
+                continue
+
+            fig, ax = plt.subplots()
+            ax.scatter(
+                data["Effect Size"],
+                -np.log10(data["P-Value"]),
+                color=properties["color"]
+            )
+            ax.set_title(properties["title"])
+            ax.set_xlabel("Effect Size")
+            ax.set_ylabel("-log10(P-Value)")
+
+            canvas = FigureCanvas(fig)
+            layout.addWidget(canvas)
+
+        dialog.exec_()
