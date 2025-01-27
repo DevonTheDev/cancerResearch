@@ -54,6 +54,14 @@ class PearsonCorrelationAnalyzer:
         bottom_10_results = []
         comparison_results = []
 
+        def cohens(test_statistic, group1, group2):
+            """Calculates Cohen's d effect size for two groups."""
+            return (test_statistic / np.sqrt((group1.size * group2.size) / (group1.size + group2.size)))
+        
+        def biserial_correlation(test_statistic, group1, group2):
+            """Calculates biserial correlation effect size for two groups."""
+            return (1 - ((2 * test_statistic) / (group1.size + group2.size)))
+
         # Combine all comparisons (Top 10 vs rest, Bottom 10 vs rest, and Top 10 vs Bottom 10)
         for category, group, comparison_group in [
             ("Top 10", top_10, all_drugs[~all_drugs["Drug"].isin(top_10["Drug"])]),
@@ -90,9 +98,11 @@ class PearsonCorrelationAnalyzer:
                         if group_normality and comparison_normality:
                             test_type = "t-test"
                             t_stat, p_value = ttest_ind(group_values, comparison_values, equal_var=False, nan_policy='omit')
+                            effect_size = cohens(t_stat, group_values, comparison_values)
                         else:
                             test_type = "Mann-Whitney U"
                             t_stat, p_value = mannwhitneyu(group_values, comparison_values, alternative='two-sided')
+                            effect_size = biserial_correlation(t_stat, group_values, comparison_values)
 
                         if p_value < 0.05:
                             result = {
@@ -101,6 +111,7 @@ class PearsonCorrelationAnalyzer:
                                 "Test Type": test_type,
                                 "T-Statistic": t_stat,
                                 "P-Value": p_value,
+                                "Effect Size": effect_size,
                                 "Group Mean": group_values.mean(),
                                 "Comparison Mean": comparison_values.mean(),
                             }
@@ -115,10 +126,10 @@ class PearsonCorrelationAnalyzer:
                     except Exception as e:
                         print(f"Error in statistical test for column '{column}': {e}")
 
-        # Sort each result by P-value, then concat for saving to csv
-        top_10_results_df = pd.DataFrame(top_10_results).sort_values(by="P-Value", ascending=True)
-        bottom_10_results_df = pd.DataFrame(bottom_10_results).sort_values(by="P-Value", ascending=True)
-        comparison_results_df = pd.DataFrame(comparison_results).sort_values(by="P-Value", ascending=True)
+        # Sort each result by Effect Size, then concat for saving to csv
+        top_10_results_df = pd.DataFrame(top_10_results).sort_values(by="Effect Size", ascending=True)
+        bottom_10_results_df = pd.DataFrame(bottom_10_results).sort_values(by="Effect Size", ascending=True)
+        comparison_results_df = pd.DataFrame(comparison_results).sort_values(by="Effect Size", ascending=True)
 
         results_df = pd.concat([top_10_results_df, bottom_10_results_df, comparison_results_df], ignore_index=True)
 
