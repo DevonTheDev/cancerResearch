@@ -53,10 +53,6 @@ class PearsonCorrelationAnalyzer:
         top_10_results = []
         bottom_10_results = []
         comparison_results = []
-
-        def cohens(test_statistic, group1, group2):
-            """Calculates Cohen's d effect size for two groups."""
-            return (test_statistic / np.sqrt((group1.size * group2.size) / (group1.size + group2.size)))
         
         def biserial_correlation(test_statistic, group1, group2):
             """Calculates biserial correlation effect size for two groups."""
@@ -98,11 +94,12 @@ class PearsonCorrelationAnalyzer:
                         if group_normality and comparison_normality:
                             test_type = "t-test"
                             t_stat, p_value = ttest_ind(group_values, comparison_values, equal_var=False, nan_policy='omit')
-                            effect_size = cohens(t_stat, group_values, comparison_values)
                         else:
                             test_type = "Mann-Whitney U"
                             t_stat, p_value = mannwhitneyu(group_values, comparison_values, alternative='two-sided')
-                            effect_size = biserial_correlation(t_stat, group_values, comparison_values)
+                        
+                        # Use Biserial Correlation for both groups to allow for comparison
+                        effect_size = biserial_correlation(t_stat, group_values, comparison_values)
 
                         if p_value < 0.05:
                             result = {

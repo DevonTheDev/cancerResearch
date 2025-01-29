@@ -123,28 +123,39 @@ class PropertiesTab(BaseTab):
 
         layout = QVBoxLayout(dialog)
 
-        # Separate data by Test Type
+        # Define test types with their respective colors
         test_types = {
-            "t-test": {"color": "blue", "title": "Cohen's d Volcano Plot"},
-            "Mann-Whitney U": {"color": "green", "title": "Rank-Biserial Correlation Volcano Plot"}
+            "t-test": {"color": "blue", "label": "T-Test"},
+            "Mann-Whitney U": {"color": "green", "label": "Mann-Whitney U"}
         }
 
+        # Create a single figure for both test types
+        fig, ax = plt.subplots()
+
+        # Plot data for each test type
         for test_type, properties in test_types.items():
             data = self.data_frame[self.data_frame["Test Type"] == test_type]
             if data.empty:
                 continue
 
-            fig, ax = plt.subplots()
             ax.scatter(
                 data["Effect Size"],
                 -np.log10(data["P-Value"]),
-                color=properties["color"]
+                color=properties["color"],
+                label=properties["label"],  # Add legend label
+                alpha=0.7  # Set transparency for better visualization
             )
-            ax.set_title(properties["title"])
-            ax.set_xlabel("Effect Size")
-            ax.set_ylabel("-log10(P-Value)")
 
-            canvas = FigureCanvas(fig)
-            layout.addWidget(canvas)
+        # Set plot titles and labels
+        ax.set_title(f"Volcano Plot for {self.gene}")
+        ax.set_xlabel("Effect Size")
+        ax.set_ylabel("-log10(P-Value)")
+
+        # Add a legend
+        ax.legend(title="Test Type")
+
+        # Embed the figure into the dialog
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
 
         dialog.exec_()
