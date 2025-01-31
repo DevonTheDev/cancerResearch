@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
-from scipy.stats import ttest_ind, zscore, mannwhitneyu, shapiro, fisher_exact, chi2_contingency, anderson
+from scipy.stats import ttest_ind, mannwhitneyu, anderson
 
 class PearsonCorrelationAnalyzer:
     def __init__(self, processed_data_dir, gene_name):

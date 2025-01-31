@@ -1,95 +1,149 @@
-import os
-import glob
+import joblib
 import pandas as pd
-import file_manager
-from scipy.stats import zscore
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
+from sklearn.metrics import accuracy_score, classification_report
+import matplotlib.pyplot as plt
+import os
+import logging
 
-# Initialize the folder creator
-folder_creator = file_manager.OrderedFolderCreator()
+# Define the columns to always extract
+FIXED_COLUMNS = ["Drug", "Pearson_Correlation"]
 
-# Get the path to the parent directory
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Get the parent directory of the current script
+parent_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Define the path to the Processed_Data folder
-processed_data_path = os.path.join(parent_dir, 'Processed_Data', '*_properties_merged')
+# Path for processed CSV folder
+processed_folder = os.path.join(os.path.dirname(parent_dir), "Processed_Data", "3_properties_merged")
+output_folder = os.path.join(processed_folder, "processed_properties")
+os.makedirs(output_folder, exist_ok=True)  # Ensure the output directory exists
 
-# Get a list of all .csv files in the directory
-csv_files = glob.glob(os.path.join(processed_data_path, '*.csv'))
+# Get all CSV files in the parent directory
+csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
 
-ranked_files = glob.glob(os.path.join(parent_dir, "*_gmt_files", "*.csv"))
+# List to store output file paths
+processed_files = []
 
-# Define the output directory for GMT files
-output_directory = folder_creator.create_folder(os.path.join(parent_dir, 'Processed_Data'), 'gmt_files')
+def generate_files():
+    for csv_file in csv_files:
+        file_path = os.path.join(processed_folder, csv_file)
 
-# Parameters
-top_percentile = 0.1
-bottom_percentile = 0.1
+        try:
+            # Load the CSV file
+            df = pd.read_csv(file_path)
 
-# Function to create gene sets (drug sets) for each property
-def create_gmt(data, top_percentile, bottom_percentile, output_file):
-    drugs = data.iloc[:, 1]  # Extract drug names from the second column
-    properties = data.columns[14:]  # Properties start from the 15th column (index 14)
+            # Check if required columns exist
+            missing_columns = [col for col in FIXED_COLUMNS if col not in df.columns]
+            if missing_columns:
+                print(f"Skipping {csv_file} - Missing columns: {missing_columns}")
+                continue
 
-    # Normalize the properties using Z-score
-    normalized_data = data.copy()
+            # Calculate cutoff index for top and bottom 10%
+            num_rows = len(df)
+            cutoff = int(0.1 * num_rows)  # 10% cutoff
+            
+            # Select the top and bottom 10% of Pearson_Correlation
+            top_10_percent = df.iloc[-cutoff:]  # Last 10%
+            bottom_10_percent = df.iloc[:cutoff]  # First 10%
+            filtered_df = pd.concat([bottom_10_percent, top_10_percent])
 
-    for prop in properties:
-        if data[prop].dtype in ['float64', 'int64']:  # Ensure the column is numeric
-            col_values = data[prop].dropna()  # Drop NaN values
-            if len(col_values.unique()) > 1:  # Check if there are at least two unique values
-                normalized_data[prop] = zscore(data[prop], nan_policy='omit')
+            # Select the fixed columns
+            selected_columns = filtered_df[FIXED_COLUMNS].copy()
+
+            # Add the Label column based on Pearson_Correlation
+            selected_columns["Label"] = selected_columns["Pearson_Correlation"].apply(lambda x: 0 if x < 0 else 1)  # 0 = Susceptible, 1 = Resistant
+
+            # Select additional columns from index 15 onward
+            if len(df.columns) > 15:
+                additional_columns = filtered_df.iloc[:, 15:]
+
+                # Identify and remove columns with NaN, Inf, or extremely large values
+                valid_additional_columns = additional_columns.loc[:, additional_columns.apply(
+                    lambda x: x.notna().all() and np.isfinite(x).all() and (x.abs() < np.finfo(np.float32).max).all()
+                )]
+
+                processed_df = pd.concat([selected_columns, valid_additional_columns], axis=1)
             else:
-                # If all values are identical or the column is entirely NaN, set the column to NaN
-                normalized_data[prop] = float('nan')
+                processed_df = selected_columns  # If not enough columns, just use fixed columns
 
-    gmt_entries = []
+            # Save processed CSV to new folder
+            processed_file_path = os.path.join(output_folder, csv_file)
+            processed_df.to_csv(processed_file_path, index=False)
 
-    for prop in properties:
-        if normalized_data[prop].isna().all():  # Skip properties where all values are NaN
-            continue
+            # Store processed file path for later use
+            processed_files.append(processed_file_path)
 
-        # Sort drugs by the normalized property value
-        sorted_data = normalized_data.sort_values(by=prop, ascending=False)
-        
-        # Define top and bottom drugs
-        top_drugs = sorted_data.iloc[:int(len(sorted_data) * top_percentile), 1].tolist()  # Drug names
-        bottom_drugs = sorted_data.iloc[-int(len(sorted_data) * bottom_percentile):, 1].tolist()  # Drug names
+            print(f"Processed and saved: {csv_file}")
 
-        # Add to GMT format
-        gmt_entries.append(f"{prop}_HIGH\tdrugs_with_high_{prop}\t" + "\t".join(top_drugs))
-        gmt_entries.append(f"{prop}_LOW\tdrugs_with_low_{prop}\t" + "\t".join(bottom_drugs))
+        except Exception as e:
+            print(f"Error processing {csv_file}: {e}")
 
-    # Write to GMT file
-    with open(output_file, "w") as gmt_file:
-        gmt_file.write("\n".join(gmt_entries))
-    print(f".gmt file created successfully: {output_file}")
+# Run the file generation process
+generate_files()
 
-def create_ranked_data(data, output_directory):
-    # Extract the Drug and Pearson_correlation columns
-    ranked_data = data[['Drug', 'Pearson_Correlation']]
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Hyperparameter tuning space (randomized search for efficiency)
+param_dist = {
+    'n_estimators': [100, 200, 500],
+    'max_depth': [None, 10, 20, 30],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'bootstrap': [True, False],
+    'max_features': ['sqrt', 'log2']  # Reducing overfitting
+}
+
+random_state_value = 1
+
+for processed_file in processed_files:
+    logging.info(f"Processing file: {processed_file}")
+
+    # Load the dataset
+    df = pd.read_csv(processed_file)
+
+    # Select features (exclude first three columns: 'Drug', 'Pearson_Correlation', 'Resistance')
+    X = df.iloc[:, 3:]
+    y = df.iloc[:, 2]  # Assuming 'Resistance' is in column index 2
+
+    # Train-test split (75% train, 25% test)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.25, random_state=random_state_value
+    )
+
+    # Hyperparameter tuning using RandomizedSearchCV (faster than GridSearchCV)
+    rf_model = RandomForestClassifier(random_state=random_state_value)
+    random_search = RandomizedSearchCV(
+        estimator=rf_model,
+        param_distributions=param_dist,
+        n_iter=20,  # Reducing iterations to balance speed/quality
+        cv=5,
+        n_jobs=-1,
+        verbose=1,
+        random_state=random_state_value
+    )
     
-    # Sort the data by Pearson_correlation in descending order
-    ranked_data = ranked_data.sort_values(by='Pearson_Correlation', ascending=False)
-    
-    # Get the base name of the file (without extension) for the output file name
-    file_name = os.path.basename(csv_file).replace('.csv', '')
-    ranked_output_file = os.path.join(output_directory, f"{file_name}_ranked.csv")
-    
-    # Save the ranked data to a new CSV file
-    ranked_data.to_csv(ranked_output_file, index=False)
-    print(f"Ranked data CSV file created successfully: {ranked_output_file}")
+    random_search.fit(X_train, y_train)
 
-# Loop through each .csv file
-for csv_file in csv_files:
-    # Load the data from the CSV file
-    data = pd.read_csv(csv_file)
-    
-    # Get the base name of the file (without extension) for the output file name
-    file_name = os.path.basename(csv_file).replace('.csv', '')
-    gmt_output_file = os.path.join(output_directory, f"{file_name}_chemical_properties.gmt")
-    
-    # Call the create_gmt function
-    create_gmt(data, top_percentile, bottom_percentile, gmt_output_file)
-    
-    # Call the create_ranked_data function
-    create_ranked_data(data, output_directory)
+    # Best parameters from the search
+    best_params = random_search.best_params_
+    logging.info(f"Best Hyperparameters: {best_params}")
+
+    # Train final model with best hyperparameters
+    best_rf_model = RandomForestClassifier(**best_params, random_state=random_state_value)
+    best_rf_model.fit(X_train, y_train)
+
+    # Save the trained model
+    base_filename = os.path.basename(processed_file).replace('.csv', '.joblib')
+    model_filename = os.path.join(os.getcwd(), f"random_forest_{base_filename}")
+    joblib.dump(best_rf_model, model_filename)
+    logging.info(f"Model saved as {model_filename}")
+
+    # Make predictions
+    y_pred = best_rf_model.predict(X_test)
+
+    # Evaluate model
+    accuracy = accuracy_score(y_test, y_pred)
+    logging.info(f"Final Model Accuracy: {accuracy:.4f}")
+    logging.info(f"Classification Report:\n{classification_report(y_test, y_pred)}")
