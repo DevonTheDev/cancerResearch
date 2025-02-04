@@ -1,9 +1,12 @@
+from itertools import product
 import joblib
 import pandas as pd
 import numpy as np
+import shap
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 import logging
@@ -39,13 +42,12 @@ def generate_files():
                 print(f"Skipping {csv_file} - Missing columns: {missing_columns}")
                 continue
 
-            # Calculate cutoff index for top and bottom 10%
+            # Calculate cutoff index for top and bottom %
             num_rows = len(df)
-            cutoff = int(0.1 * num_rows)  # 10% cutoff
+            cutoff = int(0.01 * num_rows)  # 1% cutoff
             
-            # Select the top and bottom 10% of Pearson_Correlation
-            top_10_percent = df.iloc[-cutoff:]  # Last 10%
-            bottom_10_percent = df.iloc[:cutoff]  # First 10%
+            top_10_percent = df.iloc[-cutoff:]
+            bottom_10_percent = df.iloc[:cutoff]
             filtered_df = pd.concat([bottom_10_percent, top_10_percent])
 
             # Select the fixed columns
@@ -85,17 +87,19 @@ generate_files()
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Hyperparameter tuning space (randomized search for efficiency)
+# Set seaborn style for better visuals
+sns.set_style("whitegrid")
+
+# Define hyperparameter search space
 param_dist = {
-    'n_estimators': [100, 200, 500],
-    'max_depth': [None, 10, 20, 30],
+    'n_estimators': [50, 100, 200],
+    'max_depth': [5, 10, 20, None],
     'min_samples_split': [2, 5, 10],
     'min_samples_leaf': [1, 2, 4],
-    'bootstrap': [True, False],
-    'max_features': ['sqrt', 'log2']  # Reducing overfitting
+    'bootstrap': [True, False]
 }
 
-random_state_value = 1
+random_state_value = 42  # Ensure reproducibility
 
 for processed_file in processed_files:
     logging.info(f"Processing file: {processed_file}")
@@ -112,12 +116,12 @@ for processed_file in processed_files:
         X, y, test_size=0.25, random_state=random_state_value
     )
 
-    # Hyperparameter tuning using RandomizedSearchCV (faster than GridSearchCV)
+    # Hyperparameter tuning using RandomizedSearchCV
     rf_model = RandomForestClassifier(random_state=random_state_value)
     random_search = RandomizedSearchCV(
         estimator=rf_model,
         param_distributions=param_dist,
-        n_iter=20,  # Reducing iterations to balance speed/quality
+        n_iter=40,
         cv=5,
         n_jobs=-1,
         verbose=1,
@@ -134,6 +138,20 @@ for processed_file in processed_files:
     best_rf_model = RandomForestClassifier(**best_params, random_state=random_state_value)
     best_rf_model.fit(X_train, y_train)
 
+    # Get feature importance and remove low-importance features
+    feature_importance = best_rf_model.feature_importances_
+    selected_features = X.columns[feature_importance >= 0.005]
+    top_features_idx = np.argsort(feature_importance)[-10:]
+    selected_features = X.columns[top_features_idx]
+
+    logging.info(f"Selected {len(selected_features)} features after filtering low-importance ones.")
+
+    # Retrain with only selected features
+    X_train_selected = X_train[selected_features]
+    X_test_selected = X_test[selected_features]
+
+    best_rf_model.fit(X_train_selected, y_train)
+
     # Save the trained model
     base_filename = os.path.basename(processed_file).replace('.csv', '.joblib')
     model_filename = os.path.join(os.getcwd(), f"random_forest_{base_filename}")
@@ -141,9 +159,33 @@ for processed_file in processed_files:
     logging.info(f"Model saved as {model_filename}")
 
     # Make predictions
-    y_pred = best_rf_model.predict(X_test)
+    y_pred = best_rf_model.predict(X_test_selected)
+    y_pred_proba = best_rf_model.predict_proba(X_test_selected)[:, 1]  # Probability of resistance (class 1)
 
     # Evaluate model
     accuracy = accuracy_score(y_test, y_pred)
     logging.info(f"Final Model Accuracy: {accuracy:.4f}")
     logging.info(f"Classification Report:\n{classification_report(y_test, y_pred)}")
+
+    # ---------------------- PLOTTING RESULTS ---------------------- #
+
+    ## **1. Feature Importance Plot**
+    feature_importance_selected = best_rf_model.feature_importances_
+    sorted_idx = np.argsort(feature_importance_selected)[::-1]
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(feature_importance_selected)), feature_importance_selected[sorted_idx], align='center')
+    plt.xticks(range(len(feature_importance_selected)), np.array(selected_features)[sorted_idx], rotation=90)
+    plt.xlabel("Feature")
+    plt.ylabel("Importance Score")
+    plt.title("Feature Importance (After Removing Low-Importance Features)")
+    plt.show()
+
+    ## **2. Confusion Matrix (Heatmap)**
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=["Susceptible", "Resistant"],
+                yticklabels=["Susceptible", "Resistant"])
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.title("Confusion Matrix")
+    plt.show()
