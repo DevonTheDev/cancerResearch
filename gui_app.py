@@ -172,10 +172,11 @@ class GeneDrugApp(QMainWindow):
 
         # Separate Machine Learning Subtabs
         self.rf_ml_subtabs = QTabWidget()
-        self.exclude_autocorr_checkbox = QCheckBox("Exclude Autocorrelated Features")
+        self.exclude_autocorr_checkbox = QCheckBox("Exclude Extra Features")
         self.exclude_autocorr_checkbox.setChecked(False)
         self.exclude_autocorr_checkbox.stateChanged.connect(self.toggle_autocorr_exclusion)
-        self.tabs_dict["rf_tab"].layout().insertWidget(0, self.rf_ml_subtabs)
+        self.tabs_dict["rf_tab"].layout().insertWidget(0, self.exclude_autocorr_checkbox)
+        self.tabs_dict["rf_tab"].layout().insertWidget(1, self.rf_ml_subtabs)
 
         self.en_ml_subtabs = QTabWidget()
         self.tabs_dict["en_tab"].layout().insertWidget(0, self.en_ml_subtabs)

@@ -1,3 +1,4 @@
+from itertools import combinations
 import os
 import logging
 import joblib
@@ -99,7 +100,7 @@ def train_ml_model(X_train, y_train):
     random_search = RandomizedSearchCV(
         estimator=rf_model,
         param_distributions=param_dist,
-        n_iter=500,
+        n_iter=100,
         cv=5,
         n_jobs=-1,
         verbose=1,
@@ -152,8 +153,23 @@ def evaluate_and_save_model(model, X_test, y_test, selected_features, processed_
     }
 
 
+# Possible feature prefixes to exclude (AUTOCORR is always included)
+EXCLUDE_PREFIXES = ["BCUT", "EState_", "PEOE_", "SMR_", "SlogP_", "VSA_EState", "qed"]
+
+def generate_exclusion_combinations():
+    """Generate all combinations of EXCLUDE_PREFIXES while always including 'AUTOCORR'."""
+    all_combinations = []
+    
+    # Generate all possible subsets of EXCLUDE_PREFIXES
+    for r in range(len(EXCLUDE_PREFIXES) + 1):
+        for subset in combinations(EXCLUDE_PREFIXES, r):
+            all_combinations.append(("AUTOCORR",) + subset)  # Ensure 'AUTOCORR' is always included
+
+    return all_combinations
+
 def run_ml_model(exclude_autocorr):
-    """Runs the ML model, processes data, saves the trained model, and returns key results."""
+    """Runs the ML model for every processed file across all exclusion combinations and returns the best result."""
+    
     setup_logging()
     sns.set_style("whitegrid")
 
@@ -163,44 +179,69 @@ def run_ml_model(exclude_autocorr):
         logging.error("No processed files available. Exiting ML process.")
         return None
 
-    results = []
+    # Get all exclusion combinations
+    exclusion_combinations = generate_exclusion_combinations()
+    best_combination = None
+    best_avg_accuracy = -1
 
-    for processed_file in processed_files:
-        logging.info(f"Processing file: {processed_file}")
+    # Dictionary to store results
+    accuracy_results = {}
 
-        # Load dataset
-        df = pd.read_csv(processed_file)
-        if exclude_autocorr: # Allows for testing the model without AUTOCORR2D values to see differences
-            df = df.drop(columns=[col for col in df.columns if col.startswith("AUTOCORR")])
-        
-        X = df.iloc[:, 3:]  # Features (excluding first three columns)
-        y = df.iloc[:, 2]  # Target variable (Resistance)
+    # Iterate through all exclusion combinations
+    for exclude_set in exclusion_combinations:
+        logging.info(f"Testing exclusion set: {exclude_set}")
+        accuracies = []
 
-        # Train-test split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.25, random_state=RANDOM_STATE
-        )
+        for processed_file in processed_files:
+            logging.info(f"Processing file: {processed_file} with exclusions: {exclude_set}")
 
-        # Train ML model
-        model = train_ml_model(X_train, y_train)
+            # Load dataset
+            df = pd.read_csv(processed_file)
 
-        # Feature selection based on importance
-        feature_importance = model.feature_importances_
-        selected_feature_indices = np.where(feature_importance >= FEATURE_CUTOFF)[0]
-        selected_features = X.columns[selected_feature_indices]
+            # Drop columns that start with any prefix in exclude_set
+            df = df.drop(columns=[col for col in df.columns if any(col.startswith(prefix) for prefix in exclude_set)], errors="ignore")
 
-        # Ensure at least 5 features are selected
-        if len(selected_features) == 0:
-            logging.warning(f"No features met the cutoff of {FEATURE_CUTOFF}, selecting top 5 features instead.")
-            selected_feature_indices = np.argsort(feature_importance)[-5:]
+            X = df.iloc[:, 3:]  # Features (excluding first three columns)
+            y = df.iloc[:, 2]  # Target variable (Resistance)
+
+            # Train-test split
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.25, random_state=RANDOM_STATE, stratify=y
+            )
+
+            # Train ML model
+            model = train_ml_model(X_train, y_train)
+
+            # Feature selection based on importance
+            feature_importance = model.feature_importances_
+            selected_feature_indices = np.where(feature_importance >= FEATURE_CUTOFF)[0]
             selected_features = X.columns[selected_feature_indices]
 
-        # Retrain with selected features
-        X_train_selected, X_test_selected = X_train[selected_features], X_test[selected_features]
-        model.fit(X_train_selected, y_train)
+            # Ensure at least 5 features are selected
+            if len(selected_features) == 0:
+                logging.warning(f"No features met the cutoff of {FEATURE_CUTOFF}, selecting top 5 features instead.")
+                selected_feature_indices = np.argsort(feature_importance)[-5:]
+                selected_features = X.columns[selected_feature_indices]
 
-        # Evaluate and save results
-        result = evaluate_and_save_model(model, X_test_selected, y_test, selected_features, processed_file)
-        results.append(result)
+            # Retrain with selected features
+            X_train_selected, X_test_selected = X_train[selected_features], X_test[selected_features]
+            model.fit(X_train_selected, y_train)
 
-    return results[-1] if results else None
+            # Evaluate the model
+            y_pred = model.predict(X_test_selected)
+            accuracy = accuracy_score(y_test, y_pred)
+            accuracies.append(accuracy)
+
+        # Compute the average accuracy for this exclusion set
+        avg_accuracy = np.mean(accuracies)
+        accuracy_results[exclude_set] = avg_accuracy
+
+        logging.info(f"Exclusion set {exclude_set} achieved average accuracy: {avg_accuracy:.4f}")
+
+        # Update the best combination
+        if avg_accuracy > best_avg_accuracy or (avg_accuracy == best_avg_accuracy and len(exclude_set) < len(best_combination)):
+            best_avg_accuracy = avg_accuracy
+            best_combination = exclude_set
+
+    logging.info(f"Best exclusion set: {best_combination} with accuracy: {best_avg_accuracy:.4f}")
+    return {"best_exclusion_set": best_combination, "best_accuracy": best_avg_accuracy}
