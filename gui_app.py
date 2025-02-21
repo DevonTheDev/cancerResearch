@@ -149,29 +149,9 @@ class GeneDrugApp(QMainWindow):
         self.properties_subtabs = QTabWidget()
         properties_layout.addWidget(self.properties_subtabs)
 
-        # Separate Machine Learning Subtabs
-        self.rf_ml_subtabs = QTabWidget()
-        self.exclude_autocorr_checkbox = QCheckBox("Exclude Autocorrelated Features")
-        self.exclude_autocorr_checkbox.setChecked(False)
-        self.exclude_autocorr_checkbox.stateChanged.connect(self.toggle_autocorr_exclusion)
-        self.tabs_dict["rf_tab"].layout().insertWidget(0, self.rf_ml_subtabs)
-
-        self.en_ml_subtabs = QTabWidget()
-        self.tabs_dict["en_tab"].layout().insertWidget(0, self.en_ml_subtabs)
-
-    def toggle_autocorr_exclusion(self, state):
-        self.exclude_autocorr = state == Qt.Checked
-
-    def create_tab_with_button(self, tab_title, button_text, function):
-        """Creates a tab with a button and returns the tab widget and its layout."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        
-        button = QPushButton(button_text)
-        button.clicked.connect(function)
-
-        layout.addWidget(button)
-        return tab, layout
+        self.load_properties_button = QPushButton("Load Properties Analysis")
+        self.load_properties_button.clicked.connect(self.load_properties_analysis)
+        properties_layout.addWidget(self.load_properties_button)
 
     def select_raw_data_dir(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Directory")
