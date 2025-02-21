@@ -1,11 +1,10 @@
-import logging
 import sys
 import os
 import traceback
 import pandas as pd
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QPushButton, QLabel,
-    QFileDialog, QTextEdit, QWidget, QTabWidget, QCheckBox
+    QFileDialog, QTextEdit, QWidget, QTabWidget
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from glob import glob
@@ -13,7 +12,6 @@ from glob import glob
 from scripting import mainScript
 from scripting import gene_tab
 from scripting import pearson_correlation_analyser
-from scripting import random_forest, elastic_net
 from scripting.file_manager import OrderedFolderCreator
 
 class AnalysisThread(QThread):
@@ -79,28 +77,10 @@ class AnalysisThread(QThread):
             self.progress.emit(f"Error: {str(e)}")
             print(traceback.format_exc())
 
-class MLWorker(QThread):
-    finished = pyqtSignal(dict)
-
-    def __init__(self, use_random_forest=True, exclude_autocorr=False):
-        super().__init__()
-        self.use_random_forest = use_random_forest
-        self.exclude_autocorr = exclude_autocorr
-
-    def run(self):
-        if self.use_random_forest:
-            logging.info("Running Random Forest model...")
-            ml_results = random_forest.run_ml_model(exclude_autocorr=self.exclude_autocorr)
-        else:
-            logging.info("Running Elastic Net model...")
-            ml_results = elastic_net.run_ml_pipeline()
-        self.finished.emit(ml_results)
-
 class GeneDrugApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.analysis_thread = None
-        self.exclude_autocorr = False
         self.initUI()
 
     def initUI(self):
@@ -145,38 +125,36 @@ class GeneDrugApp(QMainWindow):
         layout.addWidget(self.output_label)
 
     def setup_data_tab(self):
-        """Sets up tabs for viewing Pearson Correlations, Properties Analysis, and ML results."""
+        self.data_tab = QWidget()
+        self.tabs.addTab(self.data_tab, "View Pearson Correlations")
+        
+        self.properties_tab = QWidget()
+        self.tabs.addTab(self.properties_tab, "View Properties Analysis")
 
-        # Tab definitions: { tab_variable_name: ("Tab Title", "Button Label", associated function) }
-        tab_definitions = {
-            "data_tab": ("View Pearson Correlations", "Load Pearson Correlations", self.load_pearson_correlations),
-            "properties_tab": ("View Properties Analysis", "Load Properties Analysis", self.load_properties_analysis),
-            "rf_tab": ("View Random Forest Analysis", "Load Random Forest Analysis", lambda: self.add_ML_tab(True)),
-            "en_tab": ("View Elastic Net Analysis", "Load Elastic Net Analysis", lambda: self.add_ML_tab(False)),
-        }
+        # Pearson Correlations Tab Layout
+        data_layout = QVBoxLayout()
+        self.data_tab.setLayout(data_layout)
 
-        # Dictionary to store tab widgets
-        self.tabs_dict = {}
-
-        for tab_name, (tab_title, button_text, function) in tab_definitions.items():
-            tab, tab_layout = self.create_tab_with_button(tab_title, button_text, function)
-            self.tabs.addTab(tab, tab_title)
-            self.tabs_dict[tab_name] = tab  # Store tab reference
-
-        # Pearson Correlations & Properties have subtabs, ML tabs do not
         self.pearson_subtabs = QTabWidget()
-        self.tabs_dict["data_tab"].layout().insertWidget(0, self.pearson_subtabs)
+        data_layout.addWidget(self.pearson_subtabs)
+
+        self.load_data_button = QPushButton("Load Pearson Correlations")
+        self.load_data_button.clicked.connect(self.load_pearson_correlations)
+        data_layout.addWidget(self.load_data_button)
+
+        # Properties Analysis Tab Layout
+        properties_layout = QVBoxLayout()
+        self.properties_tab.setLayout(properties_layout)
 
         self.properties_subtabs = QTabWidget()
-        self.tabs_dict["properties_tab"].layout().insertWidget(0, self.properties_subtabs)
+        properties_layout.addWidget(self.properties_subtabs)
 
         # Separate Machine Learning Subtabs
         self.rf_ml_subtabs = QTabWidget()
-        self.exclude_autocorr_checkbox = QCheckBox("Exclude Extra Features")
+        self.exclude_autocorr_checkbox = QCheckBox("Exclude Autocorrelated Features")
         self.exclude_autocorr_checkbox.setChecked(False)
         self.exclude_autocorr_checkbox.stateChanged.connect(self.toggle_autocorr_exclusion)
-        self.tabs_dict["rf_tab"].layout().insertWidget(0, self.exclude_autocorr_checkbox)
-        self.tabs_dict["rf_tab"].layout().insertWidget(1, self.rf_ml_subtabs)
+        self.tabs_dict["rf_tab"].layout().insertWidget(0, self.rf_ml_subtabs)
 
         self.en_ml_subtabs = QTabWidget()
         self.tabs_dict["en_tab"].layout().insertWidget(0, self.en_ml_subtabs)
@@ -300,35 +278,6 @@ class GeneDrugApp(QMainWindow):
     def add_properties_tab(self, gene, data_frame):
         gene_tab_widget = gene_tab.PropertiesTab(gene, data_frame)
         self.properties_subtabs.addTab(gene_tab_widget, gene)
-
-    def add_ML_tab(self, use_random_forest):
-        """Runs the selected ML model (Random Forest or Elastic Net) in a separate thread and updates the UI."""
-        model_name = "Random Forest" if use_random_forest else "Elastic Net"
-        self.output_label.setText(f"Running {model_name} Model... Please wait.")
-
-        # Create MLWorker Thread
-        self.ml_worker = MLWorker(use_random_forest, self.exclude_autocorr)
-
-        # ✅ Corrected signal connection to pass `use_random_forest`
-        self.ml_worker.finished.connect(lambda results: self.on_ml_finished(results, use_random_forest))
-
-        self.ml_worker.start()
-
-    def on_ml_finished(self, ml_results, use_random_forest):
-        """Handles ML results after the worker thread has completed."""
-        if not ml_results:
-            self.output_label.setText("Error: No ML results returned.")
-            return
-
-        # ✅ Use `use_random_forest` instead of relying on ml_results
-        target_subtab = self.rf_ml_subtabs if use_random_forest else self.en_ml_subtabs
-
-        # Initialize MLResultsTab and add to UI
-        ml_tab_widget = gene_tab.MLResultsTab()
-        target_subtab.addTab(ml_tab_widget, f"{'Random Forest' if use_random_forest else 'Elastic Net'} Results")
-
-        self.output_label.setText(f"{'Random Forest' if use_random_forest else 'Elastic Net'} Model Analysis Loaded.")
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

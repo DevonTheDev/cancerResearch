@@ -152,23 +152,63 @@ def evaluate_and_save_model(model, X_test, y_test, selected_features, processed_
         "classification_report": classification_rep
     }
 
-
-# Possible feature prefixes to exclude (AUTOCORR is always included)
 EXCLUDE_PREFIXES = ["BCUT", "EState_", "PEOE_", "SMR_", "SlogP_", "VSA_EState", "qed"]
 
 def generate_exclusion_combinations():
     """Generate all combinations of EXCLUDE_PREFIXES while always including 'AUTOCORR'."""
-    all_combinations = []
-    
-    # Generate all possible subsets of EXCLUDE_PREFIXES
-    for r in range(len(EXCLUDE_PREFIXES) + 1):
-        for subset in combinations(EXCLUDE_PREFIXES, r):
-            all_combinations.append(("AUTOCORR",) + subset)  # Ensure 'AUTOCORR' is always included
+    return [("AUTOCORR",) + subset for r in range(len(EXCLUDE_PREFIXES) + 1) for subset in combinations(EXCLUDE_PREFIXES, r)]
 
-    return all_combinations
+def process_file(processed_file, exclusion_sets):
+    """Preprocess and train ML model for a given file across multiple exclusion sets in parallel."""
+    
+    logging.info(f"Loading file: {processed_file}")
+    df = pd.read_csv(processed_file)
+
+    # Store accuracies for different exclusion sets
+    results = {}
+
+    for exclude_set in exclusion_sets:
+        logging.info(f"Processing exclusions: {exclude_set}")
+
+        # Drop excluded columns
+        filtered_df = df.drop(columns=[col for col in df.columns if any(col.startswith(prefix) for prefix in exclude_set)], errors="ignore")
+
+        X = filtered_df.iloc[:, 3:]  # Features
+        y = filtered_df.iloc[:, 2]  # Target variable
+
+        # Train-test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=RANDOM_STATE, stratify=y
+        )
+
+        # Train ML model
+        model = train_ml_model(X_train, y_train)
+
+        # Feature selection
+        feature_importance = model.feature_importances_
+        selected_feature_indices = np.where(feature_importance >= FEATURE_CUTOFF)[0]
+        selected_features = X.columns[selected_feature_indices]
+
+        # Ensure at least 5 features are selected
+        if len(selected_features) == 0:
+            logging.warning(f"No features met the cutoff. Selecting top 5 instead.")
+            selected_feature_indices = np.argsort(feature_importance)[-5:]
+            selected_features = X.columns[selected_feature_indices]
+
+        # Retrain with selected features
+        X_train_selected, X_test_selected = X_train[selected_features], X_test[selected_features]
+        model.fit(X_train_selected, y_train)
+
+        # Evaluate model
+        y_pred = model.predict(X_test_selected)
+        accuracy = accuracy_score(y_test, y_pred)
+
+        results[exclude_set] = accuracy  # Store accuracy
+
+    return results
 
 def run_ml_model(exclude_autocorr):
-    """Runs the ML model for every processed file across all exclusion combinations and returns the best result."""
+    """Runs the ML model across all processed files and exclusion combinations, returning the best result."""
     
     setup_logging()
     sns.set_style("whitegrid")
@@ -179,69 +219,31 @@ def run_ml_model(exclude_autocorr):
         logging.error("No processed files available. Exiting ML process.")
         return None
 
-    # Get all exclusion combinations
+    # Generate exclusion combinations
     exclusion_combinations = generate_exclusion_combinations()
-    best_combination = None
-    best_avg_accuracy = -1
+    
+    # Parallel processing of files
+    results_list = joblib.Parallel(n_jobs=-1)(
+        joblib.delayed(process_file)(processed_file, exclusion_combinations) for processed_file in processed_files
+    )
 
-    # Dictionary to store results
+    # Aggregate results
     accuracy_results = {}
+    for file_results in results_list:
+        for exclude_set, accuracy in file_results.items():
+            if exclude_set not in accuracy_results:
+                accuracy_results[exclude_set] = []
+            accuracy_results[exclude_set].append(accuracy)
 
-    # Iterate through all exclusion combinations
-    for exclude_set in exclusion_combinations:
-        logging.info(f"Testing exclusion set: {exclude_set}")
-        accuracies = []
+    # Compute average accuracy for each exclusion set
+    avg_accuracy_results = {k: np.mean(v) for k, v in accuracy_results.items()}
 
-        for processed_file in processed_files:
-            logging.info(f"Processing file: {processed_file} with exclusions: {exclude_set}")
-
-            # Load dataset
-            df = pd.read_csv(processed_file)
-
-            # Drop columns that start with any prefix in exclude_set
-            df = df.drop(columns=[col for col in df.columns if any(col.startswith(prefix) for prefix in exclude_set)], errors="ignore")
-
-            X = df.iloc[:, 3:]  # Features (excluding first three columns)
-            y = df.iloc[:, 2]  # Target variable (Resistance)
-
-            # Train-test split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.25, random_state=RANDOM_STATE, stratify=y
-            )
-
-            # Train ML model
-            model = train_ml_model(X_train, y_train)
-
-            # Feature selection based on importance
-            feature_importance = model.feature_importances_
-            selected_feature_indices = np.where(feature_importance >= FEATURE_CUTOFF)[0]
-            selected_features = X.columns[selected_feature_indices]
-
-            # Ensure at least 5 features are selected
-            if len(selected_features) == 0:
-                logging.warning(f"No features met the cutoff of {FEATURE_CUTOFF}, selecting top 5 features instead.")
-                selected_feature_indices = np.argsort(feature_importance)[-5:]
-                selected_features = X.columns[selected_feature_indices]
-
-            # Retrain with selected features
-            X_train_selected, X_test_selected = X_train[selected_features], X_test[selected_features]
-            model.fit(X_train_selected, y_train)
-
-            # Evaluate the model
-            y_pred = model.predict(X_test_selected)
-            accuracy = accuracy_score(y_test, y_pred)
-            accuracies.append(accuracy)
-
-        # Compute the average accuracy for this exclusion set
-        avg_accuracy = np.mean(accuracies)
-        accuracy_results[exclude_set] = avg_accuracy
-
-        logging.info(f"Exclusion set {exclude_set} achieved average accuracy: {avg_accuracy:.4f}")
-
-        # Update the best combination
-        if avg_accuracy > best_avg_accuracy or (avg_accuracy == best_avg_accuracy and len(exclude_set) < len(best_combination)):
-            best_avg_accuracy = avg_accuracy
-            best_combination = exclude_set
+    # Find the best exclusion set
+    best_combination, best_avg_accuracy = max(avg_accuracy_results.items(), key=lambda x: x[1])
 
     logging.info(f"Best exclusion set: {best_combination} with accuracy: {best_avg_accuracy:.4f}")
+    print(f"Best exclusion set: {best_combination} with accuracy: {best_avg_accuracy:.4f}")
     return {"best_exclusion_set": best_combination, "best_accuracy": best_avg_accuracy}
+
+if __name__ == "__main__":
+    print(run_ml_model(True))
