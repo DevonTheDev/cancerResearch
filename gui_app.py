@@ -121,11 +121,19 @@ class GeneDrugApp(QMainWindow):
         layout = QVBoxLayout()
         self.analysis_tab.setLayout(layout)
 
-        self.raw_data_label = QLabel("Raw Data Directory not found. Please select one.")
-        self.raw_data_button = QPushButton("Browse")
-        self.raw_data_button.clicked.connect(self.select_raw_data_dir)
+        try:
+            # Attempt to set the Raw Data directory by looking for it in the CWD
+            self.raw_data_dir = os.path.join(os.getcwd(), "Raw Data")
+            self.raw_data_label = QLabel("Raw Data Directory Found")
+            self.raw_data_path = QLabel(f"Selected Directory: {self.raw_data_dir}")
+            self.raw_data_button = QPushButton("Change Directory")
+        except Exception as e:
+            print(f"Error getting Raw Data Directory Automatically: {str(e)}")
+            self.raw_data_label = QLabel("Raw Data Directory not found. Please select one.")
+            self.raw_data_path = QLabel("No directory selected.")
+            self.raw_data_button = QPushButton("Select Directory")
 
-        self.raw_data_path = QLabel("No directory selected.")
+        self.raw_data_button.clicked.connect(self.select_raw_data_dir)
 
         layout.addWidget(self.raw_data_label)
         layout.addWidget(self.raw_data_button)
@@ -309,7 +317,6 @@ class GeneDrugApp(QMainWindow):
         # Create MLWorker Thread
         self.ml_worker = MLWorker(use_random_forest, self.exclude_autocorr)
 
-        # ✅ Corrected signal connection to pass `use_random_forest`
         self.ml_worker.finished.connect(lambda results: self.on_ml_finished(results, use_random_forest))
 
         self.ml_worker.start()
@@ -320,7 +327,6 @@ class GeneDrugApp(QMainWindow):
             self.output_label.setText("Error: No ML results returned.")
             return
 
-        # ✅ Use `use_random_forest` instead of relying on ml_results
         target_subtab = self.rf_ml_subtabs if use_random_forest else self.en_ml_subtabs
 
         # Initialize MLResultsTab and add to UI

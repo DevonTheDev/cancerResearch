@@ -99,7 +99,7 @@ def train_ml_model(X_train, y_train):
     random_search = RandomizedSearchCV(
         estimator=rf_model,
         param_distributions=param_dist,
-        n_iter=200,
+        n_iter=500,
         cv=5,
         n_jobs=-1,
         verbose=1,
