@@ -10,98 +10,19 @@ from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report
 
 # Constants
-FIXED_COLUMNS = ["Drug", "Pearson_Correlation"]
 RANDOM_STATE = 42  # Ensures reproducibility
 FEATURE_CUTOFF = 0.005  # Threshold for selecting important features
-CUTOFF_PERCENT = 0.01  # Percentage of top and bottom data to select
 
 # Directories
 parent_dir = os.path.dirname(os.path.abspath(__file__))
-processed_folder = os.path.join(os.path.dirname(parent_dir), "Processed_Data", "3_properties_merged")
-output_folder = os.path.join(processed_folder, "processed_properties")
-os.makedirs(output_folder, exist_ok=True)  # Ensure output directory exists
+processed_folder = os.path.join(os.path.dirname(parent_dir), "Processed_Data", "3_properties_merged", "ml_processed_properties")
 
 # Get all CSV files in the directory
 csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
 
-
 def setup_logging():
     """Sets up logging for the script."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-
-def load_and_process_csv(csv_file):
-    """Loads a CSV file, filters data, and selects relevant columns."""
-    file_path = os.path.join(processed_folder, csv_file)
-    
-    try:
-        df = pd.read_csv(file_path)
-
-        # Check for missing required columns
-        missing_columns = [col for col in FIXED_COLUMNS if col not in df.columns]
-        if missing_columns:
-            logging.warning(f"Skipping {csv_file} - Missing columns: {missing_columns}")
-            return None
-
-        # Calculate cutoff index for top and bottom 1%
-        cutoff = max(1, int(CUTOFF_PERCENT * len(df)))  # Ensure at least 1 row is selected
-        top_1_percent = df.iloc[-cutoff:]
-        bottom_1_percent = df.iloc[:cutoff]
-        filtered_df = pd.concat([bottom_1_percent, top_1_percent])
-
-        # Select fixed columns
-        processed_df = filtered_df[FIXED_COLUMNS].copy()
-
-        # Label classification based on Pearson_Correlation
-        processed_df["Label"] = processed_df["Pearson_Correlation"].apply(lambda x: 0 if x < 0 else 1)
-
-        # Add additional properties from column index 15 onwards
-        if len(df.columns) > 15:
-            additional_columns = filtered_df.iloc[:, 15:]
-
-            # Store original additional columns for comparison
-            original_additional_columns = set(additional_columns.columns)
-
-            # Remove NaN, Inf, or extremely large values
-            valid_columns = additional_columns.loc[:, additional_columns.apply(
-                lambda x: x.notna().all() and np.isfinite(x).all() and (x.abs() < np.finfo(np.float32).max).all()
-            )]
-
-            # Drop Unnecessary Columns (Mostly duplicated)
-            valid_columns = valid_columns.drop(columns=["ExactMolWt"])
-
-            # Drop columns with less than 3 unique values
-            valid_columns = valid_columns.loc[:, valid_columns.nunique() >= 3]
-
-            # Store remaining additional columns after filtering
-            remaining_columns = set(valid_columns.columns)
-
-            # Identify dropped columns
-            dropped_columns = original_additional_columns - remaining_columns
-            if dropped_columns:
-                logging.info(f"Dropped columns from {csv_file}: {sorted(dropped_columns)}")
-                print(f"Dropped columns from {csv_file}: {sorted(dropped_columns)}")
-
-            # Concatenate filtered additional columns with processed_df
-            processed_df = pd.concat([processed_df, valid_columns], axis=1)
-
-        # Save processed CSV
-        processed_file_path = os.path.join(output_folder, csv_file)
-        processed_df.to_csv(processed_file_path, index=False)
-        logging.info(f"Processed and saved: {csv_file}")
-
-        return processed_file_path
-
-    except Exception as e:
-        logging.error(f"Error processing {csv_file}: {e}")
-        return None
-
-
-def generate_files():
-    """Processes all CSV files and returns a list of processed file paths."""
-    processed_files = [load_and_process_csv(file) for file in csv_files]
-    return [file for file in processed_files if file is not None]  # Remove None values
-
 
 def train_ml_model(X_train, y_train):
     """Performs hyperparameter tuning and trains a Random Forest model."""
@@ -171,29 +92,25 @@ def evaluate_and_save_model(model, X_test, y_test, selected_features, processed_
     }
 
 
-def run_ml_model(exclude_autocorr):
+def run_ml_model():
     """Runs the ML model, processes data, saves the trained model, and returns key results."""
     setup_logging()
     sns.set_style("whitegrid")
 
-    # Generate processed files
-    processed_files = generate_files()
-    if not processed_files:
+    if not csv_files:
         logging.error("No processed files available. Exiting ML process.")
         return None
 
     results = []
 
-    for processed_file in processed_files:
+    for processed_file in csv_files:
         logging.info(f"Processing file: {processed_file}")
 
         # Load dataset
-        df = pd.read_csv(processed_file)
-        if exclude_autocorr: # Allows for testing the model without AUTOCORR2D values to see differences
-            df = df.drop(columns=[col for col in df.columns if col.startswith("AUTOCORR")])
+        df = pd.read_csv(os.path.join(processed_folder, processed_file))
         
         X = df.iloc[:, 3:]  # Features (excluding first three columns)
-        y = df.iloc[:, 2]  # Target variable (Resistance)
+        y = df.iloc[:, 2]  # Target variable (Binary Resistance)
 
         # Train-test split
         X_train, X_test, y_train, y_test = train_test_split(

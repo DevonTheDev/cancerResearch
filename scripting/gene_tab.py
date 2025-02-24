@@ -178,15 +178,19 @@ class MLResultsTab(QWidget):
         self.load_models_from_parent_directory()
         self.initUI()
 
-    def load_models_from_parent_directory(self):
+    def load_models_from_parent_directory(self, force_reload=False):
         """Searches the parent directory for .joblib files and loads trained models and metadata."""
         parent_dir = os.path.join(os.path.dirname(os.getcwd()), "cancerResearch")  # Get parent directory
         logging.info(f"Searching for joblib models in: {parent_dir}")
 
+        if force_reload:
+            self.models.clear()
+            self.results.clear()
+
         for file in os.listdir(parent_dir):
             if file.endswith(".joblib"):
-                # Determine model type (Random Forest or ElasticNet)
-                model_type = "random_forest" if file.startswith("random_forest_") else "elasticnet"
+                # Determine model type (Random Forest or XGBoost)
+                model_type = "random_forest" if file.startswith("random_forest_") else "xgboost"
                 gene_name = file.replace(f"{model_type}_", "").replace(".joblib", "").replace("_properties_merged", "")
                 model_path = os.path.join(parent_dir, file)
 
@@ -196,31 +200,29 @@ class MLResultsTab(QWidget):
 
                     self.models[gene_name] = model_data["model"]  # Store model separately
 
-                    # Store extracted results, adjusting for model type
-                    if model_type == "random_forest":
-                        self.results[gene_name] = {
-                            "model_type": "Random Forest",
-                            "model_path": model_path,
-                            "feature_importances": model_data["feature_importances"],
-                            "selected_features": model_data["selected_features"],
-                            "accuracy": model_data.get("accuracy", None),
-                            "hyperparameters": model_data.get("best_params", {}),
-                        }
-                    else:  # ElasticNet model
-                        self.results[gene_name] = {
-                            "model_type": "ElasticNet",
-                            "model_path": model_path,
-                            "feature_coefficients": model_data["feature_coefficients"],
-                            "selected_features": model_data["selected_features"],
-                            "r2_score": model_data.get("r2_score", None),
-                            "mse": model_data.get("mse", None),
-                            "hyperparameters": model_data.get("best_params", {}),
-                        }
-
+                    # Store extracted results, ensuring both RF and XGB models have the same structure
+                    self.results[gene_name] = {
+                        "model_type": model_type,
+                        "model_path": model_path,
+                        "feature_importances": model_data.get("feature_importances", []),  # Unified key
+                        "selected_features": model_data.get("selected_features", []),
+                        "accuracy": model_data.get("accuracy", None),
+                        "hyperparameters": model_data.get("best_params", {})
+                    }
+                    
                     logging.info(f"Loaded {model_type} model for gene: {gene_name}")
 
                 except Exception as e:
                     logging.error(f"Failed to load {file}: {e}")
+
+        if force_reload:
+            self.refresh_UI()
+
+    def refresh_UI(self):
+        """Refreshes the UI by reloading all tabs."""
+        self.tab_widget.clear()
+        for gene, result in self.results.items():
+            self.add_gene_tab(gene, result)
 
     def initUI(self):
         """Initializes the UI with tabs for each gene's ML results."""
@@ -237,34 +239,29 @@ class MLResultsTab(QWidget):
         tab_layout = QVBoxLayout(tab)
 
         # Model Type Display
-        model_type_label = QLabel(f"Model Type: {result['model_type']}")
+        model_type_label = QLabel(f"Model Type: {result['model_type'].replace('_', ' ').title()}")
         tab_layout.addWidget(model_type_label)
 
         # Performance Metrics
-        if result["model_type"] == "Random Forest":
-            metric_label = QLabel(f"Model Accuracy: {result['accuracy']:.4f}" if result["accuracy"] is not None else "Accuracy: Not Available")
-        else:  # ElasticNet
-            metric_label = QLabel(
-                f"R² Score: {result['r2_score']:.4f}, MSE: {result['mse']:.4f}" if result["r2_score"] is not None else "Metrics Not Available"
-            )
+        metric_label = QLabel(
+            f"Model Accuracy: {result['accuracy']:.4f}" if result["accuracy"] is not None else "Accuracy: Not Available"
+        )
         tab_layout.addWidget(metric_label)
 
         # Feature Importance Table
         feature_table = QTableWidget(len(result["selected_features"]), 2)
-        feature_table.setHorizontalHeaderLabels(
-            ["Feature", "Importance" if result["model_type"] == "Random Forest" else "Coefficient"]
-        )
+        feature_table.setHorizontalHeaderLabels(["Feature", "Importance"])
         feature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
-        # Sort features by importance/coefficient
-        feature_values = result["feature_importances"] if result["model_type"] == "Random Forest" else result["feature_coefficients"]
+        # Sort features by importance
+        feature_values = result["feature_importances"]
         sorted_features = sorted(zip(result["selected_features"], feature_values), key=lambda x: abs(x[1]), reverse=True)
 
         for i, (feature, value) in enumerate(sorted_features):
             feature_table.setItem(i, 0, QTableWidgetItem(str(feature)))
             feature_table.setItem(i, 1, QTableWidgetItem(f"{value:.4f}"))
 
-        tab_layout.addWidget(QLabel("Feature Importance" if result["model_type"] == "Random Forest" else "Feature Coefficients"))
+        tab_layout.addWidget(QLabel("Feature Importance"))
         tab_layout.addWidget(feature_table)
 
         # Model Properties Table
@@ -286,7 +283,7 @@ class MLResultsTab(QWidget):
         layout = QFormLayout(container)
 
         for key, value in result.items():
-            if key in ["feature_importances", "selected_features", "feature_coefficients"]:  # Skip redundant data
+            if key in ["feature_importances", "selected_features"]:  # Skip redundant data
                 continue
 
             if isinstance(value, dict):  # Handle hyperparameters separately
@@ -306,8 +303,8 @@ class MLResultsTab(QWidget):
 
         result = self.results[gene]
 
-        # Get feature values based on model type
-        feature_values = result["feature_importances"] if result["model_type"] == "Random Forest" else result["feature_coefficients"]
+        # Get feature values
+        feature_values = result["feature_importances"]
         selected_features = np.array(result["selected_features"])
 
         # Sort the selected features **along with** their feature values
@@ -321,7 +318,7 @@ class MLResultsTab(QWidget):
         sns.barplot(x=list(sorted_values), y=list(sorted_features), ax=ax)
 
         ax.set_title(f"Feature Importance ({gene})")
-        ax.set_xlabel("Importance Score" if result["model_type"] == "Random Forest" else "Coefficient Value")
+        ax.set_xlabel("Importance Score")
         ax.set_ylabel("Feature")
 
         self.add_canvas_to_dialog(dialog, fig)
