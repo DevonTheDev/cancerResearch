@@ -59,11 +59,30 @@ def load_and_process_csv(csv_file):
         if len(df.columns) > 15:
             additional_columns = filtered_df.iloc[:, 15:]
 
+            # Store original additional columns for comparison
+            original_additional_columns = set(additional_columns.columns)
+
             # Remove NaN, Inf, or extremely large values
             valid_columns = additional_columns.loc[:, additional_columns.apply(
                 lambda x: x.notna().all() and np.isfinite(x).all() and (x.abs() < np.finfo(np.float32).max).all()
             )]
 
+            # Drop Unnecessary Columns (Mostly duplicated)
+            valid_columns = valid_columns.drop(columns=["ExactMolWt"])
+
+            # Drop columns with less than 3 unique values
+            valid_columns = valid_columns.loc[:, valid_columns.nunique() >= 3]
+
+            # Store remaining additional columns after filtering
+            remaining_columns = set(valid_columns.columns)
+
+            # Identify dropped columns
+            dropped_columns = original_additional_columns - remaining_columns
+            if dropped_columns:
+                logging.info(f"Dropped columns from {csv_file}: {sorted(dropped_columns)}")
+                print(f"Dropped columns from {csv_file}: {sorted(dropped_columns)}")
+
+            # Concatenate filtered additional columns with processed_df
             processed_df = pd.concat([processed_df, valid_columns], axis=1)
 
         # Save processed CSV
@@ -99,7 +118,7 @@ def train_ml_model(X_train, y_train):
     random_search = RandomizedSearchCV(
         estimator=rf_model,
         param_distributions=param_dist,
-        n_iter=500,
+        n_iter=300,
         cv=5,
         n_jobs=-1,
         verbose=1,

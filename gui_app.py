@@ -91,9 +91,6 @@ class MLWorker(QThread):
         if self.use_random_forest:
             logging.info("Running Random Forest model...")
             ml_results = random_forest.run_ml_model(exclude_autocorr=self.exclude_autocorr)
-        else:
-            logging.info("Running Elastic Net model...")
-            ml_results = elastic_net.run_ml_pipeline()
         self.finished.emit(ml_results)
 
 class GeneDrugApp(QMainWindow):
