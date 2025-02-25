@@ -167,7 +167,7 @@ class PropertiesTab(BaseTab):
         dialog.exec_()
 
 class MLResultsTab(QWidget):
-    def __init__(self):
+    def __init__(self, load_random_forest):
         """
         A PyQt5 class that loads all trained ML models (.joblib files) from the parent directory
         and displays results for each gene in separate tabs.
@@ -175,10 +175,11 @@ class MLResultsTab(QWidget):
         super().__init__()
         self.models = {}  # Store models by gene name
         self.results = {}  # Store extracted results per gene
-        self.load_models_from_parent_directory()
+        self.load_random_forest = load_random_forest
+        self.load_models_from_parent_directory(self.load_random_forest)
         self.initUI()
 
-    def load_models_from_parent_directory(self, force_reload=False):
+    def load_models_from_parent_directory(self, load_random_forest, force_reload=False):
         """Searches the parent directory for .joblib files and loads trained models and metadata."""
         parent_dir = os.path.join(os.path.dirname(os.getcwd()), "cancerResearch")  # Get parent directory
         logging.info(f"Searching for joblib models in: {parent_dir}")
@@ -188,9 +189,10 @@ class MLResultsTab(QWidget):
             self.results.clear()
 
         for file in os.listdir(parent_dir):
-            if file.endswith(".joblib"):
+            if file.endswith(".joblib") and (file.startswith("random_forest_") if load_random_forest else file.startswith("xgboost_")):
                 # Determine model type (Random Forest or XGBoost)
-                model_type = "random_forest" if file.startswith("random_forest_") else "xgboost"
+                model_type = "random_forest" if load_random_forest else "xgboost"
+                print("Model type = ", model_type)
                 gene_name = file.replace(f"{model_type}_", "").replace(".joblib", "").replace("_properties_merged", "")
                 model_path = os.path.join(parent_dir, file)
 

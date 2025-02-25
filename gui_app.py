@@ -180,8 +180,8 @@ class GeneDrugApp(QMainWindow):
         self.rf_ml_subtabs = QTabWidget()
         self.tabs_dict["rf_tab"].layout().insertWidget(0, self.rf_ml_subtabs)
 
-        self.en_ml_subtabs = QTabWidget()
-        self.tabs_dict["xg_tab"].layout().insertWidget(0, self.en_ml_subtabs)
+        self.xg_ml_subtabs = QTabWidget()
+        self.tabs_dict["xg_tab"].layout().insertWidget(0, self.xg_ml_subtabs)
 
     def create_tab_with_button(self, tab_title, button_text, function):
         """Creates a tab with a button and returns the tab widget and its layout."""
@@ -319,13 +319,14 @@ class GeneDrugApp(QMainWindow):
             return
 
         # Determine which tab to update
-        target_subtab = self.rf_ml_subtabs if use_random_forest else self.en_ml_subtabs
+        print (f"USE RANDOM FOREST: {use_random_forest}")
+        target_subtab = self.rf_ml_subtabs if use_random_forest else self.xg_ml_subtabs
 
         while target_subtab.count() > 0:
             target_subtab.removeTab(0)
 
-        ml_tab_widget = gene_tab.MLResultsTab()
-        ml_tab_widget.load_models_from_parent_directory(force_reload=True)
+        ml_tab_widget = gene_tab.MLResultsTab(use_random_forest)
+        ml_tab_widget.load_models_from_parent_directory(use_random_forest, force_reload=True)
 
         target_subtab.addTab(ml_tab_widget, f"{'Random Forest' if use_random_forest else 'XG Boost'} Results")
 

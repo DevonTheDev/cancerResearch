@@ -21,18 +21,19 @@ def setup_logging():
     """Sets up logging for the script."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+param_grid = {
+    'n_estimators': [200, 500, 800, 1000],
+    'max_depth': [4, 6, 8, 10, 15, 20],
+    'learning_rate': [0.01, 0.05, 0.1, 0.5],
+    'subsample': [0.7, 0.8, 0.9],
+    'colsample_bytree': [0.7, 0.8, 0.9],
+    'reg_alpha': [0, 0.1, 0.5],
+    'reg_lambda': [0.1, 0.5, 1]
+}
+
 def train_ml_model(X_train, y_train):
     """Trains an XGBoost classifier with optimized hyperparameters."""
-    model = XGBClassifier(
-        random_state=RANDOM_STATE,
-        eval_metric="logloss",
-        n_estimators=300,
-        max_depth=10,
-        learning_rate=0.05,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        n_jobs=-1
-    )
+    model = XGBClassifier(random_state=RANDOM_STATE, eval_metric="logloss", n_jobs=-1)
     model.fit(X_train, y_train, eval_set=[(X_train, y_train)], verbose=False)
     return model
 
