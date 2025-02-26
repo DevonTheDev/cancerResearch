@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report
+from scripting import ml_file_cleaner as mlfc
 
 # Constants
 RANDOM_STATE = 42  # Ensures reproducibility
@@ -16,9 +17,14 @@ FEATURE_CUTOFF = 0.005  # Threshold for selecting important features
 # Directories
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 processed_folder = os.path.join(os.path.dirname(parent_dir), "Processed_Data", "3_properties_merged", "ml_processed_properties")
+os.makedirs(processed_folder, exist_ok=True)
 
 # Get all CSV files in the directory
 csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
+
+# Only create cleaned files if none exist currently
+if not (csv_files):
+    mlfc.MLFileCleaner.run_file_clean()
 
 def setup_logging():
     """Sets up logging for the script."""
@@ -70,7 +76,10 @@ def evaluate_and_save_model(model, X_test, y_test, selected_features, processed_
 
     # Save model
     base_filename = os.path.basename(processed_file).replace(".csv", ".joblib")
-    model_filename = os.path.join(os.getcwd(), f"random_forest_{base_filename}")
+    model_filepath = os.path.join(os.getcwd(), "ml_models", "random_forest_models")
+    os.makedirs(model_filepath, exist_ok=True)
+
+    model_filename = os.path.join(model_filepath, f"random_forest_{base_filename}")
 
     model_data = {
         "model": model,

@@ -181,7 +181,7 @@ class MLResultsTab(QWidget):
 
     def load_models_from_parent_directory(self, load_random_forest, force_reload=False):
         """Searches the parent directory for .joblib files and loads trained models and metadata."""
-        parent_dir = os.path.join(os.path.dirname(os.getcwd()), "cancerResearch")  # Get parent directory
+        parent_dir = os.path.join(os.path.dirname(os.getcwd()), "cancerResearch", "ml_models", "random_forest_models" if load_random_forest else "xgboost_models")  # Get parent directory
         logging.info(f"Searching for joblib models in: {parent_dir}")
 
         if force_reload:

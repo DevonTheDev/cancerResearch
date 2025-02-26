@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report
 from xgboost import XGBClassifier
+from scripting import ml_file_cleaner as mlfc
 
 # Constants
 RANDOM_STATE = 42
@@ -15,7 +16,12 @@ FEATURE_IMPORTANCE_CUTOFF = 0.005  # Minimum feature importance threshold
 
 # Directories
 processed_folder = os.path.join(os.getcwd(), "Processed_Data", "3_properties_merged", "ml_processed_properties")
+os.makedirs(processed_folder, exist_ok=True)
 csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
+
+# Only create cleaned files if none exist currently
+if not (csv_files):
+    mlfc.MLFileCleaner.run_file_clean()
 
 def setup_logging():
     """Sets up logging for the script."""
@@ -51,7 +57,10 @@ def evaluate_and_save_model(model, X_test, y_test, selected_features, processed_
 
     # Save model
     base_filename = os.path.basename(processed_file).replace(".csv", ".joblib")
-    model_filename = os.path.join(os.getcwd(), f"xgboost_{base_filename}")
+    model_filepath = os.path.join(os.getcwd(), "ml_models", "xgboost_models")
+    os.makedirs(model_filepath, exist_ok=True)
+
+    model_filename = os.path.join(model_filepath, f"xgboost_{base_filename}")
 
     model_data = {
         "model": model,

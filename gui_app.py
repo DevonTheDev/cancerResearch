@@ -82,6 +82,9 @@ class AnalysisThread(QThread):
 class MLWorker(QThread):
     finished = pyqtSignal(dict)
 
+    ml_model_folder = os.path.join(os.getcwd())
+    print (ml_model_folder)
+
     def __init__(self, use_random_forest=False):
         super().__init__()
         self.use_random_forest = use_random_forest
