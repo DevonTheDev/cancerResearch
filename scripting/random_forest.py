@@ -115,6 +115,18 @@ def run_ml_model():
     for processed_file in csv_files:
         logging.info(f"Processing file: {processed_file}")
 
+        # Define expected model filename
+        base_filename = os.path.basename(processed_file).replace(".csv", ".joblib")
+        model_filepath = os.path.join(os.getcwd(), "ml_models", "random_forest_models")
+        model_filename = os.path.join(model_filepath, f"random_forest_{base_filename}")
+
+        # ✅ **Check if model already exists**
+        if os.path.exists(model_filename):
+            logging.info(f"Model already exists for {processed_file}. Loading model from {model_filename}.")
+            model_data = joblib.load(model_filename)
+            results.append(model_data)  # Store results from existing model
+            continue  # Skip training and move to the next file
+
         # Load dataset
         df = pd.read_csv(os.path.join(processed_folder, processed_file))
         

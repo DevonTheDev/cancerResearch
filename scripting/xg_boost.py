@@ -94,6 +94,18 @@ def run_ml_model():
     for csv_file in csv_files:
         logging.info(f"Processing file: {csv_file}")
 
+        # Define expected model filename
+        base_filename = os.path.basename(csv_file).replace(".csv", ".joblib")
+        model_filepath = os.path.join(os.getcwd(), "ml_models", "xgboost_models")
+        model_filename = os.path.join(model_filepath, f"xgboost_{base_filename}")
+
+        # ✅ **Check if model already exists**
+        if os.path.exists(model_filename):
+            logging.info(f"Model already exists for {csv_file}. Loading model from {model_filename}.")
+            model_data = joblib.load(model_filename)
+            results.append(model_data)  # Store results from existing model
+            continue  # Skip training and move to the next file
+
         # Load dataset
         file_path = os.path.join(processed_folder, csv_file)
         df = pd.read_csv(file_path)
@@ -141,7 +153,6 @@ def run_ml_model():
         # Filter dataset to selected features
         X_train_selected = pd.DataFrame(X_train[:, selected_feature_indices], columns=selected_features)
         X_test_selected = pd.DataFrame(X_test[:, selected_feature_indices], columns=selected_features)
-
 
         # Second Model Training (Only Selected Features)
         final_model = train_ml_model(X_train_selected, y_train)
