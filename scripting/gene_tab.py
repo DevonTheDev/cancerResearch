@@ -166,56 +166,91 @@ class PropertiesTab(BaseTab):
 
         dialog.exec_()
 
+import os
+import logging
+import joblib
+import numpy as np
+import tensorflow as tf
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QTabWidget,
+    QPushButton, QScrollArea, QFormLayout, QHeaderView, QDialog
+)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 class MLResultsTab(QWidget):
-    def __init__(self, load_random_forest):
+    def __init__(self, model_type):
         """
-        A PyQt5 class that loads all trained ML models (.joblib files) from the parent directory
-        and displays results for each gene in separate tabs.
+        A PyQt5 class that loads all trained ML models and displays results for each gene in separate tabs.
+        Supports Random Forest, XGBoost, and Neural Networks.
         """
         super().__init__()
         self.models = {}  # Store models by gene name
         self.results = {}  # Store extracted results per gene
-        self.load_random_forest = load_random_forest
-        self.load_models_from_parent_directory(self.load_random_forest)
+        self.model_type = model_type  # "random_forest", "xg_boost", or "neural_network"
+
+        self.load_models_from_parent_directory(self.model_type)
         self.initUI()
 
-    def load_models_from_parent_directory(self, load_random_forest, force_reload=False):
-        """Searches the parent directory for .joblib files and loads trained models and metadata."""
-        parent_dir = os.path.join(os.path.dirname(os.getcwd()), "cancerResearch", "ml_models", "random_forest_models" if load_random_forest else "xgboost_models")  # Get parent directory
-        logging.info(f"Searching for joblib models in: {parent_dir}")
+    def load_models_from_parent_directory(self, model_type, force_reload=False):
+        """Searches the appropriate directory for trained models and loads them."""
+        model_dirs = {
+            "random_forest": "random_forest_models",
+            "xg_boost": "xgboost_models",
+            "neural_network": "neural_net_models",
+        }
+
+        parent_dir = os.path.join(os.path.dirname(os.getcwd()), "cancerResearch", "ml_models", model_dirs[model_type])
+        logging.info(f"Searching for models in: {parent_dir}")
 
         if force_reload:
             self.models.clear()
             self.results.clear()
 
-        for file in os.listdir(parent_dir):
-            if file.endswith(".joblib") and (file.startswith("random_forest_") if load_random_forest else file.startswith("xgboost_")):
-                # Determine model type (Random Forest or XGBoost)
-                model_type = "random_forest" if load_random_forest else "xgboost"
-                print("Model type = ", model_type)
-                gene_name = file.replace(f"{model_type}_", "").replace(".joblib", "").replace("_properties_merged", "")
-                model_path = os.path.join(parent_dir, file)
+        if model_type in ["random_forest", "xg_boost"]:  # Joblib models
+            for file in os.listdir(parent_dir):
+                if file.endswith(".joblib") and file.startswith(f"{model_type}_"):
+                    gene_name = file.replace(f"{model_type}_", "").replace(".joblib", "").replace("_properties_merged", "")
+                    model_path = os.path.join(parent_dir, file)
 
-                try:
-                    # Load the joblib dictionary (contains model and metadata)
-                    model_data = joblib.load(model_path)
+                    try:
+                        model_data = joblib.load(model_path)
+                        self.models[gene_name] = model_data["model"]
+                        self.results[gene_name] = {
+                            "model_type": model_type,
+                            "model_path": model_path,
+                            "feature_importances": model_data.get("feature_importances", []),
+                            "selected_features": model_data.get("selected_features", []),
+                            "accuracy": model_data.get("accuracy", None),
+                            "hyperparameters": model_data.get("best_params", {})
+                        }
+                        logging.info(f"Loaded {model_type} model for gene: {gene_name}")
 
-                    self.models[gene_name] = model_data["model"]  # Store model separately
+                    except Exception as e:
+                        logging.error(f"Failed to load {file}: {e}")
 
-                    # Store extracted results, ensuring both RF and XGB models have the same structure
-                    self.results[gene_name] = {
-                        "model_type": model_type,
-                        "model_path": model_path,
-                        "feature_importances": model_data.get("feature_importances", []),  # Unified key
-                        "selected_features": model_data.get("selected_features", []),
-                        "accuracy": model_data.get("accuracy", None),
-                        "hyperparameters": model_data.get("best_params", {})
-                    }
-                    
-                    logging.info(f"Loaded {model_type} model for gene: {gene_name}")
+        elif model_type == "neural_network":  # TensorFlow .h5 models
+            for file in os.listdir(parent_dir):
+                if file.endswith(".h5") and file.startswith("mlp_"):
+                    gene_name = file.replace("mlp_", "").replace(".h5", "")
+                    model_path = os.path.join(parent_dir, file)
 
-                except Exception as e:
-                    logging.error(f"Failed to load {file}: {e}")
+                    try:
+                        model = tf.keras.models.load_model(model_path)
+                        self.models[gene_name] = model
+                        self.results[gene_name] = {
+                            "model_type": "neural_network",
+                            "model_path": model_path,
+                            "accuracy": None,  # Neural network models might not store accuracy inside the .h5 file
+                            "feature_importances": [],  # No direct feature importances for MLP
+                            "selected_features": [],
+                            "hyperparameters": {}
+                        }
+                        logging.info(f"Loaded Neural Network model for gene: {gene_name}")
+
+                    except Exception as e:
+                        logging.error(f"Failed to load {file}: {e}")
 
         if force_reload:
             self.refresh_UI()
@@ -250,45 +285,45 @@ class MLResultsTab(QWidget):
         )
         tab_layout.addWidget(metric_label)
 
-        # Feature Importance Table
-        feature_table = QTableWidget(len(result["selected_features"]), 2)
-        feature_table.setHorizontalHeaderLabels(["Feature", "Importance"])
-        feature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Feature Importance Table (only for Random Forest and XGBoost)
+        if result["feature_importances"]:
+            feature_table = QTableWidget(len(result["selected_features"]), 2)
+            feature_table.setHorizontalHeaderLabels(["Feature", "Importance"])
+            feature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
-        # Sort features by importance
-        feature_values = result["feature_importances"]
-        sorted_features = sorted(zip(result["selected_features"], feature_values), key=lambda x: abs(x[1]), reverse=True)
+            sorted_features = sorted(zip(result["selected_features"], result["feature_importances"]),
+                                     key=lambda x: abs(x[1]), reverse=True)
 
-        for i, (feature, value) in enumerate(sorted_features):
-            feature_table.setItem(i, 0, QTableWidgetItem(str(feature)))
-            feature_table.setItem(i, 1, QTableWidgetItem(f"{value:.4f}"))
+            for i, (feature, value) in enumerate(sorted_features):
+                feature_table.setItem(i, 0, QTableWidgetItem(str(feature)))
+                feature_table.setItem(i, 1, QTableWidgetItem(f"{value:.4f}"))
 
-        tab_layout.addWidget(QLabel("Feature Importance"))
-        tab_layout.addWidget(feature_table)
+            tab_layout.addWidget(QLabel("Feature Importance"))
+            tab_layout.addWidget(feature_table)
 
         # Model Properties Table
         properties_widget = self.create_model_properties_table(result)
         tab_layout.addWidget(QLabel("Model Properties"))
         tab_layout.addWidget(properties_widget)
 
-        # Visualization Buttons
-        button_feature_importance = QPushButton("Feature Importance", self)
-        button_feature_importance.clicked.connect(lambda: self.show_feature_importance(gene))
-        tab_layout.addWidget(button_feature_importance)
+        # Visualization Button (for feature importance, only for RF/XGB)
+        if result["feature_importances"]:
+            button_feature_importance = QPushButton("Feature Importance", self)
+            button_feature_importance.clicked.connect(lambda: self.show_feature_importance(gene))
+            tab_layout.addWidget(button_feature_importance)
 
         self.tab_widget.addTab(tab, gene)
 
     def create_model_properties_table(self, result):
-        """Creates a scrollable widget to display all extracted model properties."""
+        """Creates a scrollable widget to display model properties."""
         scroll_area = QScrollArea()
         container = QWidget()
         layout = QFormLayout(container)
 
         for key, value in result.items():
-            if key in ["feature_importances", "selected_features"]:  # Skip redundant data
+            if key in ["feature_importances", "selected_features"]:
                 continue
-
-            if isinstance(value, dict):  # Handle hyperparameters separately
+            if isinstance(value, dict):
                 for sub_key, sub_value in value.items():
                     layout.addRow(QLabel(f"{key} - {sub_key}"), QLabel(str(sub_value)))
             else:
@@ -304,19 +339,14 @@ class MLResultsTab(QWidget):
             return
 
         result = self.results[gene]
-
-        # Get feature values
         feature_values = result["feature_importances"]
         selected_features = np.array(result["selected_features"])
 
-        # Sort the selected features **along with** their feature values
         sorted_features, sorted_values = zip(*sorted(zip(selected_features, feature_values), key=lambda x: abs(x[1]), reverse=True))
 
-        # Prepare visualization
         dialog = self.create_dialog(f"Feature Importance - {gene}")
         fig, ax = plt.subplots(figsize=(8, 5))
 
-        # Plot directly using the sorted selected features
         sns.barplot(x=list(sorted_values), y=list(sorted_features), ax=ax)
 
         ax.set_title(f"Feature Importance ({gene})")

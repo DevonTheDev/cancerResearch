@@ -12,6 +12,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
+from scripting import ml_file_cleaner as mlfc
 
 # Constants
 RANDOM_STATE = 42
@@ -21,13 +22,6 @@ os.makedirs(MODEL_FOLDER, exist_ok=True)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-# Get all CSV files for classification
-classification_files = [f for f in os.listdir(BINARY_CLASS_FOLDER) if f.endswith(".csv")]
-
-if not classification_files:
-    logging.error("No processed gene-specific CSV files found. Exiting...")
-    exit()
 
 def clean_data(df):
     """Cleans data by removing NaN columns, low-variance features, and extreme values."""
@@ -80,7 +74,7 @@ def train_mlp_model(X_train, y_train, X_val, y_val, input_dim):
     )
     
     model.fit(
-        X_train, y_train, epochs=100, batch_size=32,
+        X_train, y_train, epochs=150, batch_size=32,
         validation_data=(X_val, y_val),
         callbacks=[early_stopping],
         verbose=1
@@ -125,6 +119,20 @@ def plot_model_performance(results):
 
 def run_mlp():
     """Loads data, trains classification models, and saves them."""
+
+    # Check if model files already exist
+    existing_models = [f for f in os.listdir(MODEL_FOLDER) if f.endswith(".h5")]
+    if existing_models:
+        logging.info("Existing models found. Skipping model training to avoid unnecessary re-training.")
+        exit()
+
+    # Get all CSV files for classification
+    classification_files = [f for f in os.listdir(BINARY_CLASS_FOLDER) if f.endswith(".csv")]
+
+    if not classification_files:
+        mlfc.MLFileCleaner.run_file_clean()
+        classification_files = [f for f in os.listdir(BINARY_CLASS_FOLDER) if f.endswith(".csv")]
+
     results = []
     
     for csv_file in classification_files:
@@ -145,7 +153,3 @@ def run_mlp():
         results.append(evaluate_and_save_model(model, X_test, y_test, gene_name))
     
     return results
-
-if __name__ == "__main__":
-    results = run_mlp()
-    plot_model_performance(results)

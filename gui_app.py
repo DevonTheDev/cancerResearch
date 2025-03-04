@@ -13,7 +13,7 @@ from glob import glob
 from scripting import mainScript
 from scripting import gene_tab
 from scripting import pearson_correlation_analyser
-from scripting import random_forest, xg_boost
+from scripting import random_forest, xg_boost, neural_network
 from scripting.file_manager import OrderedFolderCreator
 
 class AnalysisThread(QThread):
@@ -85,17 +85,20 @@ class MLWorker(QThread):
     ml_model_folder = os.path.join(os.getcwd())
     print (ml_model_folder)
 
-    def __init__(self, use_random_forest=False):
+    def __init__(self, model_type="random_forest"):
         super().__init__()
-        self.use_random_forest = use_random_forest
+        self.model_type = model_type
 
     def run(self):
-        if self.use_random_forest:
-            logging.info("Running Random Forest model...")
+        logging.info(f"Running {self.model_type.replace('_', ' ').title()} model...")
+
+        if self.model_type == "random_forest":
             ml_results = random_forest.run_ml_model()
-        else:
-            logging.info("Running XG Boost model...")
+        elif self.model_type == "xg_boost":
             ml_results = xg_boost.run_ml_model()
+        elif self.model_type == "neural_network":
+            ml_results = neural_network.run_mlp()
+
         self.finished.emit(ml_results)
 
 class GeneDrugApp(QMainWindow):
@@ -160,8 +163,9 @@ class GeneDrugApp(QMainWindow):
         tab_definitions = {
             "data_tab": ("View Pearson Correlations", "Load Pearson Correlations", self.load_pearson_correlations),
             "properties_tab": ("View Properties Analysis", "Load Properties Analysis", self.load_properties_analysis),
-            "rf_tab": ("View Random Forest Analysis", "Load Random Forest Analysis", lambda: self.add_ML_tab(True)),
-            "xg_tab": ("View XG Boost Analysis", "Load XG Boost Analysis", lambda: self.add_ML_tab(False)),
+            "rf_tab": ("View Random Forest Analysis", "Load Random Forest Analysis", lambda: self.add_ML_tab("random_forest")),
+            "xg_tab": ("View XG Boost Analysis", "Load XG Boost Analysis", lambda: self.add_ML_tab("xg_boost")),
+            "nn_tab": ("View Neural Network Analysis", "Load Neural Network Analysis", lambda: self.add_ML_tab("neural_network")),
         }
 
         # Dictionary to store tab widgets
@@ -185,6 +189,9 @@ class GeneDrugApp(QMainWindow):
 
         self.xg_ml_subtabs = QTabWidget()
         self.tabs_dict["xg_tab"].layout().insertWidget(0, self.xg_ml_subtabs)
+
+        self.nn_ml_subtabs = QTabWidget()
+        self.tabs_dict["nn_tab"].layout().insertWidget(0, self.nn_ml_subtabs)
 
     def create_tab_with_button(self, tab_title, button_text, function):
         """Creates a tab with a button and returns the tab widget and its layout."""
@@ -303,38 +310,39 @@ class GeneDrugApp(QMainWindow):
         gene_tab_widget = gene_tab.PropertiesTab(gene, data_frame)
         self.properties_subtabs.addTab(gene_tab_widget, gene)
 
-    def add_ML_tab(self, use_random_forest):
+    def add_ML_tab(self, model_type):
         """Runs the selected ML model in a separate thread and updates the UI."""
-        model_name = "Random Forest" if use_random_forest else "XG Boost"
+        model_name = model_type.replace("_", " ").title()
         self.output_label.setText(f"Running {model_name} Model... Please wait.")
 
-        # Create MLWorker Thread
-        self.ml_worker = MLWorker(use_random_forest)
+        self.ml_worker = MLWorker(model_type)
 
-        self.ml_worker.finished.connect(lambda results: self.on_ml_finished(results, use_random_forest))
+        self.ml_worker.finished.connect(lambda results: self.on_ml_finished(results, model_type))
 
         self.ml_worker.start()
 
-    def on_ml_finished(self, ml_results, use_random_forest):
+    def on_ml_finished(self, ml_results, model_type):
         """Handles ML results after the worker thread has completed."""
         if not ml_results:
-            self.output_label.setText("Error: No ML results returned.")
+            self.output_label.setText(f"Error: No ML results returned for {model_type}.")
             return
 
         # Determine which tab to update
-        print (f"USE RANDOM FOREST: {use_random_forest}")
-        target_subtab = self.rf_ml_subtabs if use_random_forest else self.xg_ml_subtabs
+        target_subtab = {
+            "random_forest": self.rf_ml_subtabs,
+            "xg_boost": self.xg_ml_subtabs,
+            "neural_network": self.nn_ml_subtabs,
+        }[model_type]
 
         while target_subtab.count() > 0:
             target_subtab.removeTab(0)
 
-        ml_tab_widget = gene_tab.MLResultsTab(use_random_forest)
-        ml_tab_widget.load_models_from_parent_directory(use_random_forest, force_reload=True)
+        ml_tab_widget = gene_tab.MLResultsTab(model_type)
+        ml_tab_widget.load_models_from_parent_directory(model_type, force_reload=True)
 
-        target_subtab.addTab(ml_tab_widget, f"{'Random Forest' if use_random_forest else 'XG Boost'} Results")
+        target_subtab.addTab(ml_tab_widget, f"{model_type.replace('_', ' ').title()} Results")
 
-        self.output_label.setText(f"{'Random Forest' if use_random_forest else 'XG Boost'} Model Analysis Loaded.")
-
+        self.output_label.setText(f"{model_type.replace('_', ' ').title()} Model Analysis Loaded.")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
