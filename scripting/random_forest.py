@@ -19,14 +19,6 @@ parent_dir = os.path.dirname(os.path.abspath(__file__))
 processed_folder = os.path.join(os.path.dirname(parent_dir), "Processed_Data", "3_properties_merged", "ml_processed_properties")
 os.makedirs(processed_folder, exist_ok=True)
 
-# Get all CSV files in the directory
-csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
-
-# Only create cleaned files if none exist currently
-if not (csv_files):
-    mlfc.MLFileCleaner.run_file_clean()
-    csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
-
 def setup_logging():
     """Sets up logging for the script."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -106,6 +98,14 @@ def run_ml_model():
     """Runs the ML model, processes data, saves the trained model, and returns key results."""
     setup_logging()
     sns.set_style("whitegrid")
+
+    # Get all CSV files in the directory
+    csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
+
+    # Only create cleaned files if none exist currently
+    if not (csv_files):
+        mlfc.MLFileCleaner.run_file_clean()
+        csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
 
     if not csv_files:
         logging.error("No processed files available. Exiting ML process.")

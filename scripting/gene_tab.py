@@ -13,6 +13,8 @@ import seaborn as sns
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import os
 
+import tensorflow as tf
+
 class BaseTab(QWidget):
     def __init__(self, data_frame):
         super().__init__()
@@ -166,41 +168,30 @@ class PropertiesTab(BaseTab):
 
         dialog.exec_()
 
-import os
-import logging
-import joblib
-import numpy as np
-import tensorflow as tf
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QTabWidget,
-    QPushButton, QScrollArea, QFormLayout, QHeaderView, QDialog
-)
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 class MLResultsTab(QWidget):
-    def __init__(self, model_type):
+    def __init__(self, model_type, ml_results=None):
         """
-        A PyQt5 class that loads all trained ML models and displays results for each gene in separate tabs.
+        A PyQt5 class that loads trained ML models and displays results for each gene in separate tabs.
         Supports Random Forest, XGBoost, and Neural Networks.
+        
+        - `model_type`: "random_forest", "xg_boost", or "neural_network"
+        - `ml_results`: Used for Neural Network results (list of dicts with {"gene": ..., "score": ...}).
         """
         super().__init__()
         self.models = {}  # Store models by gene name
         self.results = {}  # Store extracted results per gene
         self.model_type = model_type  # "random_forest", "xg_boost", or "neural_network"
 
-        self.load_models_from_parent_directory(self.model_type)
+        self.load_models_from_parent_directory(self.model_type, ml_results)
         self.initUI()
 
-    def load_models_from_parent_directory(self, model_type, force_reload=False):
-        """Searches the appropriate directory for trained models and loads them."""
+    def load_models_from_parent_directory(self, model_type, ml_results=None, force_reload=False):
+        """Searches for trained models and loads results appropriately."""
         model_dirs = {
             "random_forest": "random_forest_models",
             "xg_boost": "xgboost_models",
             "neural_network": "neural_net_models",
         }
-
         parent_dir = os.path.join(os.path.dirname(os.getcwd()), "cancerResearch", "ml_models", model_dirs[model_type])
         logging.info(f"Searching for models in: {parent_dir}")
 
@@ -208,7 +199,8 @@ class MLResultsTab(QWidget):
             self.models.clear()
             self.results.clear()
 
-        if model_type in ["random_forest", "xg_boost"]:  # Joblib models
+        # Handle Random Forest & XGBoost
+        if model_type in ["random_forest", "xg_boost"]:  
             for file in os.listdir(parent_dir):
                 if file.endswith(".joblib") and file.startswith(f"{model_type}_"):
                     gene_name = file.replace(f"{model_type}_", "").replace(".joblib", "").replace("_properties_merged", "")
@@ -230,27 +222,28 @@ class MLResultsTab(QWidget):
                     except Exception as e:
                         logging.error(f"Failed to load {file}: {e}")
 
-        elif model_type == "neural_network":  # TensorFlow .h5 models
-            for file in os.listdir(parent_dir):
-                if file.endswith(".h5") and file.startswith("mlp_"):
-                    gene_name = file.replace("mlp_", "").replace(".h5", "")
-                    model_path = os.path.join(parent_dir, file)
+        # Handle Neural Network Models (use ml_results)
+        elif model_type == "neural_network" and ml_results is not None:
+            for entry in ml_results:  # ml_results is a list of {"gene": ..., "score": ...}
+                gene_name = entry["gene"]
+                accuracy = entry["score"]
+                model_path = os.path.join(parent_dir, f"mlp_{gene_name}.h5")
 
-                    try:
-                        model = tf.keras.models.load_model(model_path)
-                        self.models[gene_name] = model
-                        self.results[gene_name] = {
-                            "model_type": "neural_network",
-                            "model_path": model_path,
-                            "accuracy": None,  # Neural network models might not store accuracy inside the .h5 file
-                            "feature_importances": [],  # No direct feature importances for MLP
-                            "selected_features": [],
-                            "hyperparameters": {}
-                        }
-                        logging.info(f"Loaded Neural Network model for gene: {gene_name}")
+                try:
+                    model = tf.keras.models.load_model(model_path)
+                    self.models[gene_name] = model
+                    self.results[gene_name] = {
+                        "model_type": "neural_network",
+                        "model_path": model_path,
+                        "accuracy": accuracy,  # Now correctly extracted from `ml_results`
+                        "feature_importances": [],  # Not applicable to Neural Networks
+                        "selected_features": [],
+                        "hyperparameters": {}  # No hyperparameter tuning info available
+                    }
+                    logging.info(f"Loaded Neural Network model for gene: {gene_name}")
 
-                    except Exception as e:
-                        logging.error(f"Failed to load {file}: {e}")
+                except Exception as e:
+                    logging.error(f"Failed to load {file}: {e}")
 
         if force_reload:
             self.refresh_UI()
@@ -285,32 +278,27 @@ class MLResultsTab(QWidget):
         )
         tab_layout.addWidget(metric_label)
 
-        # Feature Importance Table (only for Random Forest and XGBoost)
-        if result["feature_importances"]:
-            feature_table = QTableWidget(len(result["selected_features"]), 2)
-            feature_table.setHorizontalHeaderLabels(["Feature", "Importance"])
-            feature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Feature Importance Table (only for RF/XGB)
+        if self.model_type in ["random_forest", "xg_boost"]:
+            if result["feature_importances"] is not None and result["feature_importances"].size > 0:
+                feature_table = QTableWidget(len(result["selected_features"]), 2)
+                feature_table.setHorizontalHeaderLabels(["Feature", "Importance"])
+                feature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
-            sorted_features = sorted(zip(result["selected_features"], result["feature_importances"]),
-                                     key=lambda x: abs(x[1]), reverse=True)
+                sorted_features = sorted(zip(result["selected_features"], result["feature_importances"]),
+                                         key=lambda x: abs(x[1]), reverse=True)
 
-            for i, (feature, value) in enumerate(sorted_features):
-                feature_table.setItem(i, 0, QTableWidgetItem(str(feature)))
-                feature_table.setItem(i, 1, QTableWidgetItem(f"{value:.4f}"))
+                for i, (feature, value) in enumerate(sorted_features):
+                    feature_table.setItem(i, 0, QTableWidgetItem(str(feature)))
+                    feature_table.setItem(i, 1, QTableWidgetItem(f"{value:.4f}"))
 
-            tab_layout.addWidget(QLabel("Feature Importance"))
-            tab_layout.addWidget(feature_table)
+                tab_layout.addWidget(QLabel("Feature Importance"))
+                tab_layout.addWidget(feature_table)
 
         # Model Properties Table
         properties_widget = self.create_model_properties_table(result)
         tab_layout.addWidget(QLabel("Model Properties"))
         tab_layout.addWidget(properties_widget)
-
-        # Visualization Button (for feature importance, only for RF/XGB)
-        if result["feature_importances"]:
-            button_feature_importance = QPushButton("Feature Importance", self)
-            button_feature_importance.clicked.connect(lambda: self.show_feature_importance(gene))
-            tab_layout.addWidget(button_feature_importance)
 
         self.tab_widget.addTab(tab, gene)
 

@@ -120,12 +120,6 @@ def plot_model_performance(results):
 def run_mlp():
     """Loads data, trains classification models, and saves them."""
 
-    # Check if model files already exist
-    existing_models = [f for f in os.listdir(MODEL_FOLDER) if f.endswith(".h5")]
-    if existing_models:
-        logging.info("Existing models found. Skipping model training to avoid unnecessary re-training.")
-        exit()
-
     # Get all CSV files for classification
     classification_files = [f for f in os.listdir(BINARY_CLASS_FOLDER) if f.endswith(".csv")]
 

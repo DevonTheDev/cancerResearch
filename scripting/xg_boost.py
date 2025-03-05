@@ -17,12 +17,6 @@ FEATURE_IMPORTANCE_CUTOFF = 0.005  # Minimum feature importance threshold
 # Directories
 processed_folder = os.path.join(os.getcwd(), "Processed_Data", "3_properties_merged", "ml_processed_properties")
 os.makedirs(processed_folder, exist_ok=True)
-csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
-
-# Only create cleaned files if none exist currently
-if not (csv_files):
-    mlfc.MLFileCleaner.run_file_clean()
-    csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
 
 def setup_logging():
     """Sets up logging for the script."""
@@ -85,6 +79,13 @@ def evaluate_and_save_model(model, X_test, y_test, selected_features, processed_
 def run_ml_model():
     """Runs the ML model, processes data, saves the trained model, and returns key results."""
     setup_logging()
+
+    csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
+
+    # Only create cleaned files if none exist currently
+    if not (csv_files):
+        mlfc.MLFileCleaner.run_file_clean()
+        csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
 
     if not csv_files:
         logging.error("No processed files available. Exiting ML process.")

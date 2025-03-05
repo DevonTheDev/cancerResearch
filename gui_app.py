@@ -99,6 +99,8 @@ class MLWorker(QThread):
         elif self.model_type == "neural_network":
             ml_results = neural_network.run_mlp()
 
+        print(ml_results)
+
         self.finished.emit(ml_results)
 
 class GeneDrugApp(QMainWindow):
