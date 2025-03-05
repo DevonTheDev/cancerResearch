@@ -8,15 +8,16 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report
-from scripting import ml_file_cleaner as mlfc
+from scripting.MachineLearning import ml_file_cleaner as mlfc
 
 # Constants
 RANDOM_STATE = 42  # Ensures reproducibility
 FEATURE_CUTOFF = 0.005  # Threshold for selecting important features
 
-# Directories
-parent_dir = os.path.dirname(os.path.abspath(__file__))
-processed_folder = os.path.join(os.path.dirname(parent_dir), "Processed_Data", "3_properties_merged", "ml_processed_properties")
+parent_dir = mlfc.MLFolderFinder().parent_dir
+
+# Define other directories relative to cancerResearch
+processed_folder = os.path.join(parent_dir, "Processed_Data", "3_properties_merged", "ml_processed_properties")
 os.makedirs(processed_folder, exist_ok=True)
 
 def setup_logging():

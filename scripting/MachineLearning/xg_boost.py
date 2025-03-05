@@ -8,15 +8,19 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report
 from xgboost import XGBClassifier
-from scripting import ml_file_cleaner as mlfc
+from scripting.MachineLearning import ml_file_cleaner as mlfc
 
 # Constants
 RANDOM_STATE = 42
 FEATURE_IMPORTANCE_CUTOFF = 0.005  # Minimum feature importance threshold
 
 # Directories
-processed_folder = os.path.join(os.getcwd(), "Processed_Data", "3_properties_merged", "ml_processed_properties")
+parent_dir = mlfc.MLFolderFinder().parent_dir
+
+# Define other directories relative to cancerResearch
+processed_folder = os.path.join(parent_dir, "Processed_Data", "3_properties_merged", "ml_processed_properties")
 os.makedirs(processed_folder, exist_ok=True)
+
 
 def setup_logging():
     """Sets up logging for the script."""

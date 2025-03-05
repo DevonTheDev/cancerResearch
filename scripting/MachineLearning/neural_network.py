@@ -12,12 +12,18 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
-from scripting import ml_file_cleaner as mlfc
+from scripting.MachineLearning import ml_file_cleaner as mlfc
 
 # Constants
 RANDOM_STATE = 42
-MODEL_FOLDER = os.path.join(os.getcwd(), "ml_models", "neural_net_models")
-BINARY_CLASS_FOLDER = os.path.join(os.getcwd(), "Processed_Data", "3_properties_merged", "ml_processed_properties")
+
+parent_dir = mlfc.MLFolderFinder().parent_dir
+
+# Define other directories relative to cancerResearch
+processed_folder = os.path.join(parent_dir, "Processed_Data", "3_properties_merged", "ml_processed_properties")
+os.makedirs(processed_folder, exist_ok=True)
+
+MODEL_FOLDER = os.path.join(parent_dir, "ml_models", "neural_net_models")
 os.makedirs(MODEL_FOLDER, exist_ok=True)
 
 # Logging setup
@@ -121,11 +127,11 @@ def run_mlp():
     """Loads data, trains classification models, and saves them."""
 
     # Get all CSV files for classification
-    classification_files = [f for f in os.listdir(BINARY_CLASS_FOLDER) if f.endswith(".csv")]
+    classification_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
 
     if not classification_files:
         mlfc.MLFileCleaner.run_file_clean()
-        classification_files = [f for f in os.listdir(BINARY_CLASS_FOLDER) if f.endswith(".csv")]
+        classification_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
 
     results = []
     
@@ -133,7 +139,7 @@ def run_mlp():
         gene_name = os.path.splitext(csv_file)[0]
         logging.info(f"Processing Classification: {gene_name}")
         
-        df = pd.read_csv(os.path.join(BINARY_CLASS_FOLDER, csv_file))
+        df = pd.read_csv(os.path.join(processed_folder, csv_file))
         if "Label" not in df.columns:
             continue
         

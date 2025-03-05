@@ -2,14 +2,41 @@ import os
 import pandas as pd
 import numpy as np
 
+
+class MLFolderFinder:
+    def __init__(self, target_folder="cancerResearch"):
+        self.target_folder = target_folder
+        self.parent_dir = self.find_parent_directory()
+        self.processed_folder = os.path.join(
+            self.parent_dir, "Processed_Data", "3_properties_merged", "ml_processed_properties"
+        )
+        os.makedirs(self.processed_folder, exist_ok=True)
+
+    def find_parent_directory(self):
+        """Finds the absolute path of the specified parent directory, ensuring it returns the target folder itself."""
+        current_dir = os.path.abspath(__file__)  # Get current script path
+        
+        while True:
+            parent_dir, last_folder = os.path.split(current_dir)  # Split path into parent & last directory
+            if last_folder == self.target_folder:
+                return current_dir  # Return "cancerResearch" directory itself
+            if not last_folder:  # Stop if we reach the root directory
+                raise FileNotFoundError(f"Parent folder '{self.target_folder}' not found in path hierarchy.")
+            current_dir = parent_dir  # Move up one level
+
+    def get_processed_folder(self):
+        """Returns the path to the processed folder."""
+        return self.processed_folder
+
+
 # Constants
 FIXED_COLUMNS = ["Drug", "Pearson_Correlation"]  # Columns to validate CSV structure
 DROPPED_COLUMNS = ["ExactMolWt"]  # Columns to drop from properties
 CUTOFF_PERCENT = 0.01  # Percentage of top and bottom data to select
 
 # Directories
-parent_dir = os.path.dirname(os.path.abspath(__file__))
-processed_folder = os.path.join(os.path.dirname(parent_dir), "Processed_Data", "3_properties_merged")
+parent_dir = MLFolderFinder().parent_dir
+processed_folder = os.path.join(parent_dir, "Processed_Data", "3_properties_merged")
 output_folder = os.path.join(processed_folder, "ml_processed_properties")
 os.makedirs(output_folder, exist_ok=True)  # Ensure output directory exists
 
