@@ -56,10 +56,10 @@ def evaluate_and_save_model(model, X_test, y_test, selected_features, processed_
 
     # Save model
     base_filename = os.path.basename(processed_file).replace(".csv", ".joblib")
-    model_filepath = os.path.join(os.getcwd(), "ml_models", "xgboost_models")
+    model_filepath = os.path.join(os.getcwd(), "ml_models", "xg_boost_models")
     os.makedirs(model_filepath, exist_ok=True)
 
-    model_filename = os.path.join(model_filepath, f"xgboost_{base_filename}")
+    model_filename = os.path.join(model_filepath, f"xg_boost_{base_filename}")
 
     model_data = {
         "model": model,

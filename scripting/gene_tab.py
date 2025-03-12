@@ -175,7 +175,6 @@ class MLResultsTab(QWidget):
         Supports Random Forest, XGBoost, and Neural Networks.
         
         - `model_type`: "random_forest", "xg_boost", or "neural_network"
-        - `ml_results`: Used for Neural Network results (list of dicts with {"gene": ..., "score": ...}).
         """
         super().__init__()
         self.models = {}  # Store models by gene name
@@ -183,13 +182,17 @@ class MLResultsTab(QWidget):
         self.model_type = model_type  # "random_forest", "xg_boost", or "neural_network"
 
         self.load_models_from_parent_directory(self.model_type, ml_results)
-        self.initUI()
+
+        if (model_type in ["random_forest", "xg_boost"]):
+            self.initUI()
+        elif model_type == "neural_network":
+            self.initNNUI()
 
     def load_models_from_parent_directory(self, model_type, ml_results=None, force_reload=False):
         """Searches for trained models and loads results appropriately."""
         model_dirs = {
             "random_forest": "random_forest_models",
-            "xg_boost": "xgboost_models",
+            "xg_boost": "xg_boost_models",
             "neural_network": "neural_net_models",
         }
         parent_dir = os.path.join(os.path.dirname(os.getcwd()), "cancerResearch", "ml_models", model_dirs[model_type])
@@ -217,6 +220,7 @@ class MLResultsTab(QWidget):
                             "accuracy": model_data.get("accuracy", None),
                             "hyperparameters": model_data.get("best_params", {})
                         }
+                        print(f"self.results is {self.results}")
                         logging.info(f"Loaded {model_type} model for gene: {gene_name}")
 
                     except Exception as e:
@@ -224,9 +228,8 @@ class MLResultsTab(QWidget):
 
         # Handle Neural Network Models (use ml_results)
         elif model_type == "neural_network" and ml_results is not None:
-            for entry in ml_results:  # ml_results is a list of {"gene": ..., "score": ...}
-                gene_name = entry["gene"]
-                accuracy = entry["score"]
+
+            for gene_name, result in ml_results.items():  # Loop through each gene in ml_results
                 model_path = os.path.join(parent_dir, f"mlp_{gene_name}.h5")
 
                 try:
@@ -235,15 +238,12 @@ class MLResultsTab(QWidget):
                     self.results[gene_name] = {
                         "model_type": "neural_network",
                         "model_path": model_path,
-                        "accuracy": accuracy,  # Now correctly extracted from `ml_results`
-                        "feature_importances": [],  # Not applicable to Neural Networks
-                        "selected_features": [],
-                        "hyperparameters": {}  # No hyperparameter tuning info available
+                        "accuracy": result['accuracy'],  # Correctly reference each accuracy
                     }
                     logging.info(f"Loaded Neural Network model for gene: {gene_name}")
 
                 except Exception as e:
-                    logging.error(f"Failed to load {file}: {e}")
+                    logging.error(f"Failed to load model for {gene_name}: {e}")
 
         if force_reload:
             self.refresh_UI()
@@ -263,6 +263,44 @@ class MLResultsTab(QWidget):
         for gene, result in self.results.items():
             self.add_gene_tab(gene, result)
 
+    def initNNUI(self):
+        """Initializes the UI for Neural Network results and plots model accuracies."""
+        layout = QVBoxLayout(self)
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+        # Extract accuracies for all neural network models
+        nn_accuracies = {
+            gene: result["accuracy"]
+            for gene, result in self.results.items()
+            if result["model_type"] == "neural_network"
+        }
+
+        if not nn_accuracies:
+            print("No neural network models found for plotting.")
+            return
+
+        # Create Matplotlib Figure and Canvas
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.bar(nn_accuracies.keys(), nn_accuracies.values(), color='blue', alpha=0.7)
+
+        # Formatting
+        ax.set_xlabel("Gene Model")
+        ax.set_ylabel("Accuracy")
+        ax.set_title("Neural Network Model Accuracies")
+        ax.set_ylim(0, 1)  # Accuracy values range from 0 to 1
+        ax.set_xticklabels(nn_accuracies.keys(), rotation=45, ha="right")
+
+        # Display accuracy values above bars
+        for i, (gene, acc) in enumerate(nn_accuracies.items()):
+            ax.text(i, acc + 0.02, f"{acc:.3f}", ha='center', fontsize=10, fontweight='bold')
+
+        fig.tight_layout()
+
+        # Embed Matplotlib plot into PyQt5 UI
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+
     def add_gene_tab(self, gene, result):
         """Creates a separate tab for each gene's ML results."""
         tab = QWidget()
@@ -272,21 +310,23 @@ class MLResultsTab(QWidget):
         model_type_label = QLabel(f"Model Type: {result['model_type'].replace('_', ' ').title()}")
         tab_layout.addWidget(model_type_label)
 
-        # Performance Metrics
-        metric_label = QLabel(
-            f"Model Accuracy: {result['accuracy']:.4f}" if result["accuracy"] is not None else "Accuracy: Not Available"
-        )
-        tab_layout.addWidget(metric_label)
-
-        # Feature Importance Table (only for RF/XGB)
         if self.model_type in ["random_forest", "xg_boost"]:
-            if result["feature_importances"] is not None and result["feature_importances"].size > 0:
+
+            # Performance Metrics
+            metric_label = QLabel(
+                f"Model Accuracy: {result['accuracy']:.4f}" if result["accuracy"] is not None else "Accuracy: Not Available"
+            )
+            tab_layout.addWidget(metric_label)
+
+            # Feature Importance Table (only for RF/XGB)
+
+            if result["feature_importances"] is not None:
                 feature_table = QTableWidget(len(result["selected_features"]), 2)
                 feature_table.setHorizontalHeaderLabels(["Feature", "Importance"])
                 feature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
                 sorted_features = sorted(zip(result["selected_features"], result["feature_importances"]),
-                                         key=lambda x: abs(x[1]), reverse=True)
+                                        key=lambda x: abs(x[1]), reverse=True)
 
                 for i, (feature, value) in enumerate(sorted_features):
                     feature_table.setItem(i, 0, QTableWidgetItem(str(feature)))
@@ -295,12 +335,12 @@ class MLResultsTab(QWidget):
                 tab_layout.addWidget(QLabel("Feature Importance"))
                 tab_layout.addWidget(feature_table)
 
-        # Model Properties Table
-        properties_widget = self.create_model_properties_table(result)
-        tab_layout.addWidget(QLabel("Model Properties"))
-        tab_layout.addWidget(properties_widget)
+            # Model Properties Table
+            properties_widget = self.create_model_properties_table(result)
+            tab_layout.addWidget(QLabel("Model Properties"))
+            tab_layout.addWidget(properties_widget)
 
-        self.tab_widget.addTab(tab, gene)
+            self.tab_widget.addTab(tab, gene)
 
     def create_model_properties_table(self, result):
         """Creates a scrollable widget to display model properties."""

@@ -105,24 +105,6 @@ def evaluate_and_save_model(model, X_test, y_test, gene_name):
     
     return {"gene": gene_name, "score": accuracy}
 
-def plot_model_performance(results):
-    """Plots accuracy for classification models."""
-    if not results:
-        logging.warning("No results available to plot.")
-        return
-    
-    plt.figure(figsize=(10, 5))
-    genes = [res["gene"] for res in results]
-    accuracies = [res["score"] for res in results]
-    plt.barh(genes, accuracies, color="skyblue")
-    plt.xlabel("Accuracy")
-    plt.ylabel("Gene")
-    plt.title("MLP Classification Model Accuracy")
-    plt.xlim(0, 1)  # Accuracy ranges from 0 to 1
-    plt.gca().invert_yaxis()
-    plt.grid(axis="x", linestyle="--", alpha=0.7)
-    plt.show()
-
 def run_mlp():
     """Loads data, trains classification models, and saves them."""
 
@@ -150,6 +132,11 @@ def run_mlp():
         X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=RANDOM_STATE)
         
         model = train_mlp_model(X_train, y_train, X_val, y_val, X.shape[1])
-        results.append(evaluate_and_save_model(model, X_test, y_test, gene_name))
+        model_result = (evaluate_and_save_model(model, X_test, y_test, gene_name))
+
+        results.append({
+            "model_path": model_result['gene'],
+            "accuracy": model_result['score']
+        })
     
-    return results
+    return results if results else None

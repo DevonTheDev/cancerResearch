@@ -122,7 +122,7 @@ def run_ml_model():
         model_filepath = os.path.join(os.getcwd(), "ml_models", "random_forest_models")
         model_filename = os.path.join(model_filepath, f"random_forest_{base_filename}")
 
-        # ✅ **Check if model already exists**
+        # Check if model already exists
         if os.path.exists(model_filename):
             logging.info(f"Model already exists for {processed_file}. Loading model from {model_filename}.")
             model_data = joblib.load(model_filename)

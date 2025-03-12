@@ -1,5 +1,4 @@
-import os
-from scripting.MachineLearning import random_forest, xg_boost, neural_network, ml_file_cleaner
+from scripting.MachineLearning import random_forest, xg_boost, neural_network
 from PyQt5.QtCore import QThread, pyqtSignal
 
 class MLWorker(QThread):
@@ -19,6 +18,8 @@ class MLWorker(QThread):
         elif self.model_type == "neural_network":
             ml_results = neural_network.run_mlp()
 
-        print(ml_results)
+        # Neural Network returns a list of all models, we need to convert it to a dict for emitting
+        if isinstance(ml_results, list):
+            ml_results = {d["model_path"]: {"model_path": d["model_path"], "accuracy": d["accuracy"]} for d in ml_results} if ml_results else None
 
         self.finished.emit(ml_results)

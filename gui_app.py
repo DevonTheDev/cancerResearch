@@ -105,7 +105,7 @@ class GeneDrugApp(QMainWindow):
         self.nn_ml_subtabs = QTabWidget()
         self.tabs_dict["nn_tab"].layout().insertWidget(0, self.nn_ml_subtabs)
 
-    def create_tab_with_button(self, tab_title, button_text, function):
+    def create_tab_with_button(self, button_text, function):
         """Creates a tab with a button and returns the tab widget and its layout."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -249,8 +249,7 @@ class GeneDrugApp(QMainWindow):
         while target_subtab.count() > 0:
             target_subtab.removeTab(0)
 
-        ml_tab_widget = gene_tab.MLResultsTab(model_type)
-        ml_tab_widget.load_models_from_parent_directory(model_type, force_reload=True)
+        ml_tab_widget = gene_tab.MLResultsTab(model_type, ml_results)
 
         target_subtab.addTab(ml_tab_widget, f"{model_type.replace('_', ' ').title()} Results")
 
