@@ -1,59 +1,17 @@
 import os
 import logging
-import numpy as np
-import pandas as pd
-import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras.optimizers import Adam
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score, classification_report
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
 from scripting.MachineLearning import ml_file_cleaner as mlfc
 
-# Constants
-RANDOM_STATE = 42
-
 parent_dir = mlfc.MLFolderFinder().parent_dir
-
-# Define other directories relative to cancerResearch
-processed_folder = os.path.join(parent_dir, "Processed_Data", "3_properties_merged", "ml_processed_properties")
-os.makedirs(processed_folder, exist_ok=True)
-
 MODEL_FOLDER = os.path.join(parent_dir, "ml_models", "neural_net_models")
 os.makedirs(MODEL_FOLDER, exist_ok=True)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-def clean_data(df):
-    """Cleans data by removing NaN columns, low-variance features, and extreme values."""
-    initial_cols = df.shape[1]
-
-    # Drop NaN columns
-    df = df.dropna(axis=1)
-
-    # Convert all columns to numeric, coerce errors to NaN
-    df = df.apply(pd.to_numeric, errors='coerce')
-
-    # Remove low-variance features
-    df = df.loc[:, df.nunique() > 1]
-
-    # Drop remaining NaNs
-    df.dropna(inplace=True)
-
-    # Standardize features
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    scaler = StandardScaler()
-    df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
-
-    final_cols = df.shape[1]
-    logging.info(f"Data cleaned: Removed {initial_cols - final_cols} columns.")
-    
-    return df
 
 def build_mlp_model(input_dim):
     """Builds an MLP model for binary classification."""
@@ -71,9 +29,28 @@ def build_mlp_model(input_dim):
     
     return model
 
-def train_mlp_model(X_train, y_train, X_val, y_val, input_dim):
+def evaluate_model(model, data):
+
+    X_test = data["X_test"]
+
+    """Evaluates the model and saves it."""
+    y_pred = model.predict(X_test)
+    y_pred = (y_pred > 0.5).astype(int)  # Convert probabilities to binary class (0 or 1)
+    
+    return y_pred
+
+def run_mlp(result):
+    """Loads data, trains classification models, and saves them."""
+    
+    # Structure as per MLWorker.py function extract_data(self, processed_file)
+    X_train = result["X_train"]
+    X_val = result["X_val"]
+    y_train = result["y_train"]
+    y_val = result["y_val"]
+    X = result["X"]
+    
     """Trains an MLP model for classification."""
-    model = build_mlp_model(input_dim)
+    model = build_mlp_model(X.shape[1])
     
     early_stopping = keras.callbacks.EarlyStopping(
         monitor='val_loss', patience=10, restore_best_weights=True
@@ -87,56 +64,3 @@ def train_mlp_model(X_train, y_train, X_val, y_val, input_dim):
     )
     
     return model
-
-def evaluate_and_save_model(model, X_test, y_test, gene_name):
-    """Evaluates the model and saves it."""
-    y_pred = model.predict(X_test)
-    y_pred = (y_pred > 0.5).astype(int)  # Convert probabilities to binary class (0 or 1)
-    
-    accuracy = accuracy_score(y_test, y_pred)
-    report = classification_report(y_test, y_pred, target_names=["Susceptible", "Resistant"])
-    logging.info(f"{gene_name} | Accuracy: {accuracy:.4f}")
-    logging.info(f"Classification Report:\n{report}")
-    
-    # Save model
-    model_filename = os.path.join(MODEL_FOLDER, f"mlp_{gene_name}.h5")
-    model.save(model_filename)
-    logging.info(f"Model saved as {model_filename}")
-    
-    return {"gene": gene_name, "score": accuracy}
-
-def run_mlp():
-    """Loads data, trains classification models, and saves them."""
-
-    # Get all CSV files for classification
-    classification_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
-
-    if not classification_files:
-        mlfc.MLFileCleaner.run_file_clean()
-        classification_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
-
-    results = []
-    
-    for csv_file in classification_files:
-        gene_name = os.path.splitext(csv_file)[0]
-        logging.info(f"Processing Classification: {gene_name}")
-        
-        df = pd.read_csv(os.path.join(processed_folder, csv_file))
-        if "Label" not in df.columns:
-            continue
-        
-        df = clean_data(df)
-        X, y = df.iloc[:, 3:], LabelEncoder().fit_transform(df["Label"])
-        
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=RANDOM_STATE)
-        X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=RANDOM_STATE)
-        
-        model = train_mlp_model(X_train, y_train, X_val, y_val, X.shape[1])
-        model_result = (evaluate_and_save_model(model, X_test, y_test, gene_name))
-
-        results.append({
-            "model_path": model_result['gene'],
-            "accuracy": model_result['score']
-        })
-    
-    return results if results else None

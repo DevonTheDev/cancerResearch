@@ -1,4 +1,3 @@
-import logging
 import sys
 import os
 import traceback
@@ -75,35 +74,26 @@ class GeneDrugApp(QMainWindow):
         tab_definitions = {
             "data_tab": ("View Pearson Correlations", "Load Pearson Correlations", self.load_pearson_correlations),
             "properties_tab": ("View Properties Analysis", "Load Properties Analysis", self.load_properties_analysis),
-            "rf_tab": ("View Random Forest Analysis", "Load Random Forest Analysis", lambda: self.add_ML_tab("random_forest")),
-            "xg_tab": ("View XG Boost Analysis", "Load XG Boost Analysis", lambda: self.add_ML_tab("xg_boost")),
-            "nn_tab": ("View Neural Network Analysis", "Load Neural Network Analysis", lambda: self.add_ML_tab("neural_network")),
+            "ml_tab": ("View Machine Learning Analysis", "Load Machine Learning Analysis", self.add_ML_tab)
         }
 
         # Dictionary to store tab widgets
         self.tabs_dict = {}
 
         for tab_name, (tab_title, button_text, function) in tab_definitions.items():
-            tab, _ = self.create_tab_with_button(tab_title, button_text, function)
+            tab, _ = self.create_tab_with_button(button_text, function)
             self.tabs.addTab(tab, tab_title)
             self.tabs_dict[tab_name] = tab  # Store tab reference
 
-        # Pearson Correlations & Properties have subtabs, ML tabs do not
+        # Pearson Correlations & Properties have subtabs
         self.pearson_subtabs = QTabWidget()
         self.tabs_dict["data_tab"].layout().insertWidget(0, self.pearson_subtabs)
 
         self.properties_subtabs = QTabWidget()
         self.tabs_dict["properties_tab"].layout().insertWidget(0, self.properties_subtabs)
 
-        # Separate Machine Learning Subtabs
-        self.rf_ml_subtabs = QTabWidget()
-        self.tabs_dict["rf_tab"].layout().insertWidget(0, self.rf_ml_subtabs)
-
-        self.xg_ml_subtabs = QTabWidget()
-        self.tabs_dict["xg_tab"].layout().insertWidget(0, self.xg_ml_subtabs)
-
-        self.nn_ml_subtabs = QTabWidget()
-        self.tabs_dict["nn_tab"].layout().insertWidget(0, self.nn_ml_subtabs)
+        self.ml_subtabs = QTabWidget()
+        self.tabs_dict["ml_tab"].layout().insertWidget(0, self.ml_subtabs)
 
     def create_tab_with_button(self, button_text, function):
         """Creates a tab with a button and returns the tab widget and its layout."""
@@ -222,38 +212,23 @@ class GeneDrugApp(QMainWindow):
         gene_tab_widget = gene_tab.PropertiesTab(gene, data_frame)
         self.properties_subtabs.addTab(gene_tab_widget, gene)
 
-    def add_ML_tab(self, model_type):
+    def add_ML_tab(self):
         """Runs the selected ML model in a separate thread and updates the UI."""
-        model_name = model_type.replace("_", " ").title()
-        self.output_label.setText(f"Running {model_name} Model... Please wait.")
+        self.ml_worker = MLWorker.MLWorker()
 
-        self.ml_worker = MLWorker.MLWorker(model_type)
-
-        self.ml_worker.finished.connect(lambda results: self.on_ml_finished(results, model_type))
+        self.ml_worker.finished.connect(lambda results: self.on_ml_finished(results))
 
         self.ml_worker.start()
 
-    def on_ml_finished(self, ml_results, model_type):
+    def on_ml_finished(self, ml_results):
         """Handles ML results after the worker thread has completed."""
         if not ml_results:
-            self.output_label.setText(f"Error: No ML results returned for {model_type}.")
+            self.output_label.setText(f"Error: No ML results returned.")
             return
 
-        # Determine which tab to update
-        target_subtab = {
-            "random_forest": self.rf_ml_subtabs,
-            "xg_boost": self.xg_ml_subtabs,
-            "neural_network": self.nn_ml_subtabs,
-        }[model_type]
+        ml_tab_widget = gene_tab.MLResultsTab(ml_results)
 
-        while target_subtab.count() > 0:
-            target_subtab.removeTab(0)
-
-        ml_tab_widget = gene_tab.MLResultsTab(model_type, ml_results)
-
-        target_subtab.addTab(ml_tab_widget, f"{model_type.replace('_', ' ').title()} Results")
-
-        self.output_label.setText(f"{model_type.replace('_', ' ').title()} Model Analysis Loaded.")
+        self.ml_subtabs.addTab(ml_tab_widget, "ML Results")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
