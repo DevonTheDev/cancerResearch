@@ -78,18 +78,37 @@ class MLWorker(QThread):
         print("Running Machine Learning Models...")
 
         final_results = {}
+        feature_importances = {}  # Use a dictionary to store cumulative feature importances
 
         for data in self.results:
             
-            rf_model, rf_features = random_forest.run_ml_model(data, RANDOM_STATE)
+            # Run Random Forest Model
+            rf_model, rf_features, rf_importances = random_forest.run_ml_model(data, RANDOM_STATE)
             rf_preds = random_forest.evaluate_model(rf_model, data, rf_features)
 
-            xg_model, xg_features = xg_boost.run_ml_model(data, RANDOM_STATE)
+            # Update feature importances for Random Forest
+            for feature, importance in rf_importances.items():
+                if feature in feature_importances:
+                    feature_importances[feature] += importance
+                else:
+                    feature_importances[feature] = importance
+
+            # Run XGBoost Model
+            xg_model, xg_features, xg_importances = xg_boost.run_ml_model(data, RANDOM_STATE)
             xg_preds = xg_boost.evaluate_model(xg_model, data, xg_features)
 
-            nn_model = neural_network.run_mlp(data)
-            nn_preds = neural_network.evaluate_model(nn_model, data).squeeze() # Squeeze to fit into shape (30,)
+            # Update feature importances for XGBoost
+            for feature, importance in xg_importances.items():
+                if feature in feature_importances:
+                    feature_importances[feature] += importance
+                else:
+                    feature_importances[feature] = importance
 
+            # Run Neural Network Model
+            nn_model = neural_network.run_mlp(data)
+            nn_preds = neural_network.evaluate_model(nn_model, data).squeeze()  # Ensure shape consistency
+
+            # Ensemble Predictions (Bagging)
             stacked_predictions = np.vstack((rf_preds, xg_preds, nn_preds)).T.astype(int)
             bagged_preds = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=1, arr=stacked_predictions)
 
@@ -98,11 +117,16 @@ class MLWorker(QThread):
             print(f"Type of y_test: {type(y_test)}")
             print(f"Type of bagged_preds: {type(bagged_preds)}")
 
+            # Store final results
             final_results[data["file_name"]] = {
                 "random_forest_accuracy": accuracy_score(y_test, rf_preds),
                 "xg_boost_accuracy": accuracy_score(y_test, xg_preds),
                 "neural_network_accuracy": accuracy_score(y_test, nn_preds),
                 "bagged_accuracy": accuracy_score(y_test, bagged_preds),
             }
+
+        # Print or store feature importance values for debugging
+        feature_importances = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)
+        print("Final Cumulative Feature Importances:", feature_importances)
 
         self.finished.emit(final_results)

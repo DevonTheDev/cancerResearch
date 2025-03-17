@@ -57,7 +57,7 @@ def run_mlp(result):
     )
     
     model.fit(
-        X_train, y_train, epochs=150, batch_size=32,
+        X_train, y_train, epochs=300, batch_size=32,
         validation_data=(X_val, y_val),
         callbacks=[early_stopping],
         verbose=1

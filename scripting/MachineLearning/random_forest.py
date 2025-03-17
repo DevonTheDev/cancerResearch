@@ -2,6 +2,7 @@ import logging
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from sklearn.discriminant_analysis import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import RandomizedSearchCV
 from scripting.MachineLearning import ml_file_cleaner as mlfc
@@ -60,7 +61,7 @@ def run_ml_model(result, RANDOM_STATE):
     """Runs the ML model, processes data, saves the trained model, and returns key results."""
     setup_logging()
 
-    # Structure as per MLWorker.py function extract_data(self, processed_file)
+    # Extract training data
     X_train = result["X_train"]
     y_train = result["y_train"]
     X = result["X"]
@@ -77,10 +78,16 @@ def run_ml_model(result, RANDOM_STATE):
     if len(selected_features) == 0:
         logging.warning(f"No features met the cutoff of {FEATURE_CUTOFF}, selecting top 5 features instead.")
         selected_feature_indices = np.argsort(feature_importance)[-5:]
-        selected_features = X.columns[selected_feature_indices]
+        selected_features = list(X.columns[selected_feature_indices])
+
+    scaler = StandardScaler()
+    scaled_feature_importance = scaler.fit_transform(feature_importance.reshape(-1, 1)).flatten()
+
+    # Create feature importance dictionary for selected features
+    selected_feature_importance = {feature: scaled_feature_importance[idx] for feature, idx in zip(selected_features, selected_feature_indices)}
 
     # Retrain with selected features
     X_train_selected = X_train[selected_features]
     final_model = train_ml_model(X_train_selected, y_train, RANDOM_STATE)
 
-    return(final_model, selected_features)
+    return final_model, selected_features, selected_feature_importance

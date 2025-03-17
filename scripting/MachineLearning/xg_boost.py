@@ -1,5 +1,6 @@
 import logging
 import numpy as np
+from sklearn.discriminant_analysis import StandardScaler
 from xgboost import XGBClassifier
 
 # Constants
@@ -59,12 +60,16 @@ def run_ml_model(result, RANDOM_STATE):
         selected_feature_indices = np.argsort(feature_importances)[-5:]
         selected_features = X.columns[selected_feature_indices]
 
-    logging.info(f"Selected {len(selected_features)} features for retraining.")
+    scaler = StandardScaler()
+    scaled_feature_importance = scaler.fit_transform(feature_importances.reshape(-1, 1)).flatten()
+
+    # Create feature importance dictionary for selected features
+    selected_feature_importance = {feature: scaled_feature_importance[idx] for feature, idx in zip(selected_features, selected_feature_indices)}
 
     # Filter dataset to selected features
-    X_train_selected = X_train.iloc[:, selected_feature_indices]
+    X_train_selected = X_train[selected_features]
 
     # Second Model Training (Only Selected Features)
     final_model = train_ml_model(X_train_selected, y_train, RANDOM_STATE)
 
-    return (final_model, selected_features)
+    return (final_model, selected_features, selected_feature_importance)
