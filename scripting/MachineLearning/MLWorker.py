@@ -75,10 +75,59 @@ class MLWorker(QThread):
     def run(self):
         print("Running Machine Learning Models...")
 
+        saved_models = []
+
         for result in self.results:
-          df = pd.read_csv(os.path.join("Processed_Data", "3_properties_merged", "ml_processed_properties", result["file_name"]))
-          data = df.iloc[:, 2:]
+            # Load dataset
+            print (f"Processing file: {result['file_name']}")
+            df = pd.read_csv(os.path.join("Processed_Data", "3_properties_merged", "ml_processed_properties", result["file_name"]))
+            data = df.iloc[:, 2:]
 
-        s = setup(data, target = 'Label', session_id = RANDOM_STATE)
+            # Step 1: Setup PyCaret with full dataset
+            s = setup(data, target='Label', session_id=RANDOM_STATE)
 
-        print(s)
+            # Step 2: Train an initial model
+            initial_model = compare_models(sort="Accuracy", fold=10)
+
+            # Step 3: Check if feature importance is available
+            if hasattr(initial_model, "feature_importances_"):
+                # Extract trained feature names from PyCaret
+                trained_feature_names = get_config('X_train').columns.tolist()
+
+                # Ensure feature importance size matches feature names
+                if len(initial_model.feature_importances_) == len(trained_feature_names):
+                    feature_importance_df = pd.DataFrame({
+                        'Feature': trained_feature_names,
+                        'Importance': initial_model.feature_importances_
+                    }).sort_values(by='Importance', ascending=False)
+
+                    # Step 4: Select top 10% features dynamically
+                    num_features = max(5, int(len(feature_importance_df) * 0.1))  # Ensure at least 5 features
+                    selected_features = feature_importance_df.iloc[:num_features]['Feature'].tolist()
+
+                    # Step 5: Retrain model using only the selected features
+                    refined_data = data[selected_features + ['Label']]
+
+                    # Step 6: Setup PyCaret again with refined dataset (avoid redundant transformations)
+                    s = setup(refined_data, target='Label', remove_multicollinearity=True, 
+                            multicollinearity_threshold=0.85, session_id=RANDOM_STATE)
+
+                    # Step 7: Train top models again (using parallel processing)
+                    best_models = compare_models(sort="Accuracy", fold=10, n_select=5)
+
+                    # Step 8: Tune models efficiently with early stopping
+                    tuned_models = [tune_model(model, optimize="Accuracy", n_iter=300, fold=10, 
+                                            search_library="scikit-optimize", search_algorithm="bayesian", 
+                                            early_stopping=True) for model in best_models]
+
+                    # Step 9: Blend models instead of stacking (better generalization)
+                    blended = blend_models(tuned_models, fold=10, method="soft")
+
+                    # Step 10: Print accuracy
+                    saved_models.append({result["file_name"]: blended})
+                else:
+                    print("⚠️ Feature Importance Count Mismatch! Skipping feature selection.")
+            else:
+                print("⚠️ Selected model does not support feature importance. Skipping feature selection.")
+
+        print(saved_models)
