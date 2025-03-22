@@ -1,3 +1,4 @@
+import json
 from sklearn.discriminant_analysis import StandardScaler
 from PyQt5.QtCore import QThread, pyqtSignal
 from sklearn.model_selection import train_test_split
@@ -21,13 +22,15 @@ if not (csv_files):
     mlfc.MLFileCleaner.run_file_clean()
     csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
     
+import os
+import pandas as pd
+from pycaret.classification import *
 
 class MLWorker(QThread):
     finished = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
-
         self.results = []
 
         for processed_file in csv_files:
@@ -37,37 +40,11 @@ class MLWorker(QThread):
         print(f"Processing file: {processed_file}")
 
         df = pd.read_csv(os.path.join(processed_folder, processed_file))
-        
-        X = df.iloc[:, 3:]  # Features (excluding first three columns)
-        y = df.iloc[:, 2]  # Target variable (Binary Resistance)
 
-        # First split: Train-test
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.25, random_state=RANDOM_STATE
-        )
-
-        # Second split: Train-validation (taking a portion of training data for neural network)
-        X_train_for_val, X_val, y_train_for_val, y_val = train_test_split(
-            X_train, y_train, test_size=0.25, random_state=RANDOM_STATE
-        )
-
-        # 🚀 Apply Standard Scaling
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)  # Fit & transform training data
-        X_val_scaled = scaler.transform(X_val)  # Transform validation data
-        X_test_scaled = scaler.transform(X_test)  # Transform test data
-
-        X_train = pd.DataFrame(X_train_scaled, columns=X.columns, index=X_train.index)
-        X_val = pd.DataFrame(X_val_scaled, columns=X.columns, index=X_val.index)
-        X_test = pd.DataFrame(X_test_scaled, columns=X.columns, index=X_test.index)
+        X = df.iloc[:, 3:]
+        y = df.iloc[:, 2]
 
         self.results.append({
-            "X_train": X_train,
-            "X_test": X_test,
-            "X_val": X_val,
-            "y_train": y_train,
-            "y_test": y_test,
-            "y_val": y_val,
             "X": X,
             "y": y,
             "file_name": processed_file
@@ -75,77 +52,88 @@ class MLWorker(QThread):
 
     def run(self):
         print("Running Machine Learning Models...")
+        self.run_independent_models()
+
+    def run_independent_models(self):
+        saved_model_dir = os.path.join("Processed_Data", "ml_saved_models")
+        os.makedirs(saved_model_dir, exist_ok=True)
+
+        self.accuracy_results = []
 
         for result in self.results:
-            
-            saved_models = []
-            
-            # Attempt to retrieve already tuned models, append to saved_models and check length
-            loaded_files = os.listdir(os.path.join("Processed_Data", "ml_saved_models", result["file_name"]))
+            file_name = result["file_name"]
+            gene_name = file_name.replace("_properties_merged.csv", "")
+            model_path = os.path.join(saved_model_dir, gene_name)
 
-            for file in loaded_files:
-                saved_models.append(load_model(file))
-            
-            if len(saved_models) != NUMBER_OF_MODELS:       
-                if (result == self.results[0]): # TEMP
-                    # Load dataset
-                    print (f"Processing file: {result['file_name']}")
-                    df = pd.read_csv(os.path.join("Processed_Data", "3_properties_merged", "ml_processed_properties", result["file_name"]))
-                    data = df.iloc[:, 2:]
+            print(f"\nProcessing gene: {gene_name}")
 
-                    # Step 1: Setup PyCaret with full dataset
-                    s = setup(data, target='Label', session_id=RANDOM_STATE)
+            data = result['X']
+            data['Label'] = result['y']
 
-                    # Step 2: Train an initial model
-                    initial_model = compare_models(sort="Accuracy", fold=10)
+            # Run setup to match PyCaret requirements before loading
+            setup(data, target='Label', session_id=RANDOM_STATE)
 
-                    # Step 3: Check if feature importance is available
-                    if hasattr(initial_model, "feature_importances_"):
-                        # Extract trained feature names from PyCaret
-                        trained_feature_names = get_config('X_train').columns.tolist()
+            if os.path.exists(model_path + ".pkl"):
+                metrics_path = model_path + "_metrics.json"
+                if os.path.exists(metrics_path):
+                    with open(metrics_path, "r") as f:
+                        metrics = json.load(f)
+                        mean_accuracy = metrics.get("accuracy")
+                        print(f"✔ Loaded model with stored accuracy: {mean_accuracy}")
 
-                        # Ensure feature importance size matches feature names
-                        if len(initial_model.feature_importances_) == len(trained_feature_names):
-                            feature_importance_df = pd.DataFrame({
-                                'Feature': trained_feature_names,
-                                'Importance': initial_model.feature_importances_
-                            }).sort_values(by='Importance', ascending=False)
+                self.accuracy_results.append({"gene": gene_name, "accuracy": mean_accuracy})
+                continue
 
-                            # Step 4: Select top 10% features dynamically
-                            num_features = max(5, int(len(feature_importance_df) * 0.1))  # Ensure at least 5 features
-                            selected_features = feature_importance_df.iloc[:num_features]['Feature'].tolist()
+            # Compare and get top 5 models
+            best_models = compare_models(sort="Accuracy", fold=10, n_select=5)
 
-                            # Step 5: Retrain model using only the selected features
-                            refined_data = data[selected_features + ['Label']]
+            # Get average feature importance from top models
+            importance_df = pd.DataFrame()
+            for model in best_models:
+                if hasattr(model, "feature_importances_"):
+                    feature_names = get_config("X_train").columns.tolist()
+                    importances = model.feature_importances_
+                    if len(importances) == len(feature_names):
+                        temp_df = pd.DataFrame({"Feature": feature_names, "Importance": importances})
+                        importance_df = pd.concat([importance_df, temp_df])
 
-                            # Step 6: Setup PyCaret again with refined dataset (avoid redundant transformations)
-                            s = setup(refined_data, target='Label', remove_multicollinearity=True, 
-                                    multicollinearity_threshold=0.85, session_id=RANDOM_STATE)
+            if importance_df.empty:
+                print(f"⚠️ No models with valid feature importances for {gene_name}. Skipping.")
+                continue
 
-                            # Step 7: Train top models again
-                            best_models = compare_models(sort="Accuracy", fold=10, n_select=NUMBER_OF_MODELS)
+            importance_df = importance_df.groupby("Feature").mean().reset_index()
+            top_features = importance_df.sort_values(by="Importance", ascending=False)
+            num_features = max(5, int(len(top_features) * 0.1))
+            selected_features = top_features.iloc[:num_features]['Feature'].tolist()
 
-                            # Step 8: Tune models efficiently with early stopping
-                            tuned_models = [tune_model(model, optimize="Accuracy", n_iter=200, fold=10, 
-                                                    search_library="scikit-optimize", search_algorithm="bayesian", 
-                                                    early_stopping=True) for model in best_models]
-                            
-                            for tuned_model in tuned_models:
-                                saved_model_directory = os.path.join("Processed_Data", "ml_saved_models", result["file_name"])
-                                save_model(tuned_model, saved_model_directory)
+            # Retrain on selected features
+            refined_data = result['X'][selected_features].copy()
+            refined_data['Label'] = result['y']
 
-                            # Step 9: Blend models
-                            blended = blend_models(tuned_models, fold=10, method="soft")
+            setup(refined_data, target='Label', remove_multicollinearity=True, 
+                  multicollinearity_threshold=0.85, session_id=RANDOM_STATE)
 
-                            # Step 10: Print accuracy
-                            saved_models.append({result["file_name"]: blended})
-                        else:
-                            print("⚠️ Feature Importance Count Mismatch! Skipping feature selection.")
-                    else:
-                        print("⚠️ Selected model does not support feature importance. Skipping feature selection.")
-            
-            # If there is already a tuned model saved, blend and determine accuracy
-            else:
-                blended = blend_models(saved_models, fold=10, method="soft")
+            tuned_models = []
+            for model in best_models:
+                tuned = tune_model(
+                    model, optimize="Accuracy", n_iter=10, fold=10,
+                    search_library="scikit-optimize", search_algorithm="bayesian",
+                    early_stopping=True
+                )
+                tuned_models.append(tuned)
 
-        print(saved_models)
+            # Blend and save
+            blended = blend_models(tuned_models, fold=10, method="soft")
+
+            score = pull()
+            mean_accuracy = float(score.iloc[10, 1]) # Extract mean accuracy from df from pull()
+
+            save_model(blended, model_path)
+
+            metrics_path = model_path + "_metrics.json"
+            with open(metrics_path, "w") as f:
+                json.dump({"accuracy": mean_accuracy if mean_accuracy else "failed to extract"}, f)
+
+            self.accuracy_results.append({"gene": gene_name, "accuracy": mean_accuracy})
+
+        print(self.accuracy_results)
