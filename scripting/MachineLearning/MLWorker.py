@@ -1,3 +1,4 @@
+from collections import defaultdict
 import json
 from sklearn.discriminant_analysis import StandardScaler
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -21,10 +22,28 @@ csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
 if not (csv_files):
     mlfc.MLFileCleaner.run_file_clean()
     csv_files = [f for f in os.listdir(processed_folder) if f.endswith(".csv")]
-    
-import os
-import pandas as pd
-from pycaret.classification import *
+
+# Mapping from full model name to PyCaret abbreviation
+model_name_to_abbr = {
+    "Logistic Regression": "lr",
+    "K Neighbors Classifier": "knn",
+    "Naive Bayes": "nb",
+    "Decision Tree Classifier": "dt",
+    "SVM - Linear Kernel": "svm",
+    "SVM - Radial Kernel": "rbfsvm",
+    "Gaussian Process Classifier": "gpc",
+    "MLP Classifier": "mlp",
+    "Ridge Classifier": "ridge",
+    "Random Forest Classifier": "rf",
+    "Quadratic Discriminant Analysis": "qda",
+    "Ada Boost Classifier": "ada",
+    "Gradient Boosting Classifier": "gbc",
+    "Linear Discriminant Analysis": "lda",
+    "Extra Trees Classifier": "et",
+    "Extreme Gradient Boosting": "xgboost",
+    "Light Gradient Boosting Machine": "lightgbm",
+    "CatBoost Classifier": "catboost"
+}
 
 class MLWorker(QThread):
     finished = pyqtSignal(dict)
@@ -53,10 +72,13 @@ class MLWorker(QThread):
     def run(self):
         print("Running Machine Learning Models...")
         self.run_independent_models()
+        self.run_shared_models()
 
     def run_independent_models(self):
         saved_model_dir = os.path.join("Processed_Data", "ml_saved_models")
         os.makedirs(saved_model_dir, exist_ok=True)
+
+        print("Yes" if os.path.exists(saved_model_dir) else "No")
 
         self.accuracy_results = []
 
@@ -137,3 +159,51 @@ class MLWorker(QThread):
             self.accuracy_results.append({"gene": gene_name, "accuracy": mean_accuracy})
 
         print(self.accuracy_results)
+
+    def run_shared_models(self):
+
+        model_average_accuracies = defaultdict(list)
+
+        # First loop to determine best models across all genes
+        for result in self.results:
+            # Run all models and append average accuracy to a dict object
+            data = result['X']
+            data['Label'] = result['y']
+            
+            setup(data, target="Label", session_id=RANDOM_STATE, verbose=False)
+            compare_models(sort="Accuracy", fold=10, n_select=13)
+
+            performance_df = pull()
+            performance_df.iloc[:, [1,2]] # Extract [Model Abbreviation, Accuracy]
+
+            for _, item in performance_df.iterrows():
+                abbr = item[0]
+                acc = item[1]
+                model_average_accuracies[abbr].append(acc)
+
+        top_5_average_models = sorted(model_average_accuracies.items(), key=lambda x: sum(x[1]) / len(x[1]), reverse=True)[:5]
+        print(top_5_average_models)
+
+        # Second loop to create top models for every gene
+        blended_models = {}
+
+        for result in self.results:
+            created_models = []
+
+            data = result['X']
+            data['Label'] = result['y']
+
+            setup(data, target="Label", session_id=RANDOM_STATE, verbose=False)
+
+            for model_name, _ in top_5_average_models:
+                abbr = model_name_to_abbr.get(model_name)
+                if abbr:
+                    created_model = create_model(abbr, fold=10)
+                    tuned_model = tune_model(created_model, fold=10, n_iter=10, early_stopping=True)
+                    created_models.append(tuned_model)
+                else:
+                    print("Error - No Model Abbreviation Found")
+            blend_models(created_models, fold=10, choose_better=True)
+            blended_models[result["file_name"]] = pull()
+        
+        print(blended_models)
