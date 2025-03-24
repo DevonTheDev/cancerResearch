@@ -1,15 +1,17 @@
 from collections import defaultdict
 import json
-from sklearn.discriminant_analysis import StandardScaler
 from PyQt5.QtCore import QThread, pyqtSignal
-from sklearn.model_selection import train_test_split
 from scripting.MachineLearning import ml_file_cleaner as mlfc
 import pandas as pd
 from pycaret.classification import *
 import os
+import warnings
+
+warnings.filterwarnings("ignore", category=UserWarning, message="resource_tracker.*")
 
 RANDOM_STATE = 42
 NUMBER_OF_MODELS = 5
+NUMBER_OF_FOLDS = 20
 
 parent_dir = mlfc.MLFolderFinder().parent_dir
 processed_folder = os.path.join(parent_dir, "Processed_Data", "3_properties_merged", "ml_processed_properties")
@@ -89,14 +91,14 @@ class MLWorker(QThread):
 
             print(f"\nProcessing gene: {gene_name}")
 
-            data = result['X']
+            data = result['X'].copy()
             data['Label'] = result['y']
 
             # Run setup to match PyCaret requirements before loading
             setup(data, target='Label', session_id=RANDOM_STATE)
 
             if os.path.exists(model_path + ".pkl"):
-                metrics_path = model_path + "_metrics.json"
+                metrics_path = model_path + "_independent_metrics.json"
                 if os.path.exists(metrics_path):
                     with open(metrics_path, "r") as f:
                         metrics = json.load(f)
@@ -107,7 +109,7 @@ class MLWorker(QThread):
                 continue
 
             # Compare and get top 5 models
-            best_models = compare_models(sort="Accuracy", fold=10, n_select=5)
+            best_models = compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, n_select=5, turbo=False)
 
             # Get average feature importance from top models
             importance_df = pd.DataFrame()
@@ -137,22 +139,23 @@ class MLWorker(QThread):
 
             tuned_models = []
             for model in best_models:
+                print(f"Tuning model: {model}")
                 tuned = tune_model(
-                    model, optimize="Accuracy", n_iter=10, fold=10,
+                    model, optimize="Accuracy", n_iter=50, fold=NUMBER_OF_FOLDS,
                     search_library="scikit-optimize", search_algorithm="bayesian",
-                    early_stopping=True
+                    early_stopping=True, tuner_verbose=False
                 )
                 tuned_models.append(tuned)
 
             # Blend and save
-            blended = blend_models(tuned_models, fold=10, method="soft")
+            blended = blend_models(tuned_models, fold=NUMBER_OF_FOLDS)
 
             score = pull()
-            mean_accuracy = float(score.iloc[10, 1]) # Extract mean accuracy from df from pull()
+            mean_accuracy = float(score.iloc[NUMBER_OF_FOLDS, 1]) # Extract mean accuracy from df from pull()
 
             save_model(blended, model_path)
 
-            metrics_path = model_path + "_metrics.json"
+            metrics_path = model_path + "_independent_metrics.json"
             with open(metrics_path, "w") as f:
                 json.dump({"accuracy": mean_accuracy if mean_accuracy else "failed to extract"}, f)
 
@@ -161,20 +164,20 @@ class MLWorker(QThread):
         print(self.accuracy_results)
 
     def run_shared_models(self):
-
         model_average_accuracies = defaultdict(list)
 
         # First loop to determine best models across all genes
         for result in self.results:
+
             # Run all models and append average accuracy to a dict object
-            data = result['X']
+            data = result['X'].copy()
             data['Label'] = result['y']
             
             setup(data, target="Label", session_id=RANDOM_STATE, verbose=False)
-            compare_models(sort="Accuracy", fold=10, n_select=13)
+            compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, turbo=False, n_select=len(models()))
 
             performance_df = pull()
-            performance_df.iloc[:, [1,2]] # Extract [Model Abbreviation, Accuracy]
+            performance_df = performance_df.iloc[:, [0,1]] # Extract [Model Abbreviation, Accuracy]
 
             for _, item in performance_df.iterrows():
                 abbr = item[0]
@@ -198,12 +201,14 @@ class MLWorker(QThread):
             for model_name, _ in top_5_average_models:
                 abbr = model_name_to_abbr.get(model_name)
                 if abbr:
-                    created_model = create_model(abbr, fold=10)
-                    tuned_model = tune_model(created_model, fold=10, n_iter=10, early_stopping=True)
+                    created_model = create_model(abbr, fold=NUMBER_OF_FOLDS, verbose=False)
+                    tuned_model = tune_model(created_model, optimize="Accuracy", n_iter=100, fold=NUMBER_OF_FOLDS,
+                                            search_library="scikit-optimize", search_algorithm="bayesian",
+                                            early_stopping=True, tuner_verbose=False)
                     created_models.append(tuned_model)
                 else:
                     print("Error - No Model Abbreviation Found")
-            blend_models(created_models, fold=10, choose_better=True)
+            blend_models(created_models, fold=NUMBER_OF_FOLDS, choose_better=True, method="soft")
             blended_models[result["file_name"]] = pull()
         
         print(blended_models)
