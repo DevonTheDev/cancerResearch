@@ -1,7 +1,5 @@
 import os
 import pandas as pd
-from scipy.stats import pearsonr
-import matplotlib.pyplot as plt
 import numpy as np
 
 def merge_abc_and_drug_data(raw_data_dir):

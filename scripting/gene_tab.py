@@ -1,4 +1,3 @@
-import logging
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QPushButton, QDialog, QTabWidget, QScrollArea, QLabel, QFormLayout
 )

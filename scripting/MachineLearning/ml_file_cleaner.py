@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import numpy as np
 
-
 class MLFolderFinder:
     def __init__(self, target_folder="cancerResearch"):
         self.target_folder = target_folder

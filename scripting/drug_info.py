@@ -4,7 +4,6 @@ import pandas as pd
 from PyQt5.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QLabel, QDialog
 import pubchempy as pcp
 
-
 class DrugInfo(QWidget):
     def __init__(self):
         super().__init__()
