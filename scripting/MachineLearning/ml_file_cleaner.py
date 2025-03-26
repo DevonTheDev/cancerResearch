@@ -30,7 +30,8 @@ class MLFolderFinder:
 
 # Constants
 FIXED_COLUMNS = ["Drug", "Pearson_Correlation"]  # Columns to validate CSV structure
-DROPPED_COLUMNS = ["ExactMolWt"]  # Columns to drop from properties
+DROPPED_COLUMNS = ["ExactMolWt", "FractionCSP3", "HallKierAlpha", "HeavyAtomCount", "HeavyAtomMolWt", "LabuteASA", "Phi", "SPS", "TPSA", "NumValenceElectrons"]  # Columns to drop from properties
+DROPPED_PREFIXES = ["AUTOCORR", "BCUT2D", "BalabanJ", "BertzCT", "Chi", "EState_VSA", "FpDensityMorgan", "Kappa", "PEOE_VSA", "SMR_VSA", "VSA_EState"]
 CUTOFF_PERCENT = 0.01  # Percentage of top and bottom data to select
 
 # Directories
@@ -68,24 +69,25 @@ class MLFileCleaner:
 
             # Add additional properties from column index 15 onwards
             if len(df.columns) > 15:
-                additional_columns = filtered_df.iloc[:, 15:]  # Get drug properties
+                additional_columns = filtered_df.iloc[:, 15:].copy()  # Get drug properties
 
-                # Remove NaN, Inf, or extremely large values
-                additional_columns = additional_columns.loc[:, additional_columns.apply(
-                    lambda x: x.notna().all() and np.isfinite(x).all() and (x.abs() < np.finfo(np.float32).max).all()
-                )]
+                # Step 1: Drop columns with NaN, Inf, or extremely large values
+                max_float = np.finfo(np.float32).max
+                def is_valid_column(col):
+                    return col.notna().all() and np.isfinite(col).all() and (col.abs() < max_float).all()
+                
+                additional_columns = additional_columns.loc[:, additional_columns.apply(is_valid_column)]
 
-                # Remove columns starting with "AUTOCORR"
-                additional_columns = additional_columns.drop(columns=[col for col in additional_columns.columns if col.startswith("AUTOCORR")], errors='ignore')
+                # Step 2: Drop columns with disallowed prefixes
+                additional_columns = additional_columns.loc[:, ~additional_columns.columns.str.startswith(tuple(DROPPED_PREFIXES))]
 
-                # Drop unnecessary columns
-                for column in DROPPED_COLUMNS:
-                    additional_columns = additional_columns.drop(column, axis=1, errors='ignore')
+                # Step 3: Drop specific unwanted columns
+                additional_columns = additional_columns.drop(columns=DROPPED_COLUMNS, errors='ignore')
 
-                # Drop columns with less than 3 unique values
+                # Step 4: Drop columns with fewer than 3 unique values
                 additional_columns = additional_columns.loc[:, additional_columns.nunique() >= 3]
 
-                # Concatenate filtered additional columns with processed_df
+                # Step 5: Concatenate cleaned columns
                 processed_df = pd.concat([processed_df, additional_columns], axis=1)
 
             # Save processed CSV

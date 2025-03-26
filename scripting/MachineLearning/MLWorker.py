@@ -2,6 +2,9 @@ from collections import defaultdict
 import json
 import time
 from PyQt5.QtCore import QThread, pyqtSignal
+from matplotlib import pyplot as plt
+import numpy as np
+import shap
 from sklearn.discriminant_analysis import StandardScaler
 from scripting.MachineLearning import ml_file_cleaner as mlfc
 import pandas as pd
@@ -17,7 +20,7 @@ RANDOM_STATE = 42
 NUMBER_OF_MODELS = 5
 NUMBER_OF_FOLDS = 3
 NUMBER_OF_ITERATIONS = 5
-FEATURE_PERCENTAGE = 0.1
+FEATURE_PERCENTAGE = 0.25
 
 # Get processed files
 parent_dir = mlfc.MLFolderFinder().parent_dir
@@ -116,7 +119,7 @@ class MLWorker(QThread):
 
             # Initial setup and comparison
             self.setup_data(data)
-            best_models = compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, n_select=NUMBER_OF_MODELS, turbo=False)
+            best_models = compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, n_select=NUMBER_OF_MODELS, turbo=False, exclude=["knn"])
 
             # Collect feature importances
             importance_df = pd.DataFrame()
@@ -170,6 +173,37 @@ class MLWorker(QThread):
             save_model(blended, model_path)
             self.save_metrics(model_path + "_independent_metrics.json", {"accuracy": accuracy, "top_features": importance_df.iloc[:num_features].to_json(orient="records")})
 
+            # Generate and save SHAP values and plots
+            try:
+                X = get_config("X")
+                y = get_config("y")
+
+                shap_output_path = os.path.join(model_path + "_shap_outputs")
+                os.makedirs(shap_output_path, exist_ok=True)
+
+                # Tree-based SHAP (fast)
+                try:
+                    explainer = shap.Explainer(blended)
+                    shap_values = explainer(X)
+                    shap_X = X
+                except Exception as tree_error:
+                    # Fallback for non-tree models
+                    background = shap.utils.sample(X, 100)
+                    explainer = shap.KernelExplainer(blended.predict, background)
+
+                    shap_X = X.sample(100)
+                    shap_values = explainer.shap_values(shap_X)
+
+                plt.figure()
+                shap.summary_plot(shap_values, shap_X, show=False)
+                plt.tight_layout()
+                plt.savefig(os.path.join(shap_output_path, "shap_summary.png"), dpi=300)
+                plt.close()
+
+            except Exception as shap_error:
+                print(f"⚠️ Could not generate SHAP summaries for {model_path}: {shap_error}")
+
+
         self.save_metrics(
             saved_independent_model_path + "_feature_importances.json",
             {
@@ -189,7 +223,7 @@ class MLWorker(QThread):
             data['Label'] = result['y']
             self.setup_data(data)
 
-            compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, turbo=False, n_select=len(models()))
+            compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, turbo=False, n_select=len(models()), exclude=["knn"])
             performance = pull().iloc[:, [0, 1]]  # [Model Abbreviation, Accuracy]
 
             for _, row in performance.iterrows():
