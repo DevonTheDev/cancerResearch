@@ -10,17 +10,15 @@ from scripting.MachineLearning import ml_file_cleaner as mlfc
 import pandas as pd
 from pycaret.classification import *
 import os
-import warnings
+import seaborn as sns
 
 os.environ["PYCARET_CUSTOM_LOGGING_LEVEL"] = "CRITICAL"
-
-warnings.filterwarnings("ignore", category=UserWarning, message="resource_tracker.*")
 
 RANDOM_STATE = 42
 NUMBER_OF_MODELS = 5
 NUMBER_OF_FOLDS = 3
 NUMBER_OF_ITERATIONS = 5
-FEATURE_PERCENTAGE = 0.25
+FEATURE_PERCENTAGE = 0.1
 
 # Get processed files
 parent_dir = mlfc.MLFolderFinder().parent_dir
@@ -72,12 +70,12 @@ class MLWorker(QThread):
         self.feature_importances = defaultdict(float)
     def extract_data(self, processed_file):
         df = pd.read_csv(os.path.join(processed_folder, processed_file))
-        X = df.iloc[:, 3:]
+        X = df.iloc[:, 4:]
         y = df.iloc[:, 2]
         return {"X": X, "y": y, "file_name": processed_file}
 
     def setup_data(self, data):
-        return setup(data, target='Label', session_id=RANDOM_STATE, verbose=False)
+        return setup(data, target='Label', session_id=RANDOM_STATE, verbose=False, remove_multicollinearity=True, multicollinearity_threshold=0.85)
 
     def tune_and_blend_models(self, models):
         tuned_models = [
@@ -119,13 +117,13 @@ class MLWorker(QThread):
 
             # Initial setup and comparison
             self.setup_data(data)
-            best_models = compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, n_select=NUMBER_OF_MODELS, turbo=False, exclude=["knn"])
+            best_models = compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, n_select=NUMBER_OF_MODELS, turbo=False, exclude=["knn", "ada", "qda"])
 
             # Collect feature importances
             importance_df = pd.DataFrame()
             for model in best_models:
                 if hasattr(model, "feature_importances_"):
-                    feature_names = get_config("X").columns.tolist()
+                    feature_names = model.feature_names_in_
                     importances = model.feature_importances_
                     if len(importances) == len(feature_names):
                         temp_df = pd.DataFrame({"Feature": feature_names, "Importance": importances})
@@ -135,7 +133,7 @@ class MLWorker(QThread):
                 print(f"⚠️ No valid feature importances for gene: {gene}. Skipping.")
                 continue
 
-            # Process feature importances
+            # Process feature importances and remove multicollinearity
             importance_df = importance_df.groupby("Feature").mean().reset_index()
             importance_df = importance_df.sort_values(by="Importance", ascending=False)
             num_features = max(5, int(len(importance_df) * FEATURE_PERCENTAGE))
@@ -151,14 +149,12 @@ class MLWorker(QThread):
             # Add scaled values back into the DataFrame
             scaled_df["ScaledImportance"] = scaled_importance
 
-            # Now you can iterate safely
             for _, row in scaled_df.iterrows():
                 name = row["Feature"]
                 importance = row["ScaledImportance"]
                 self.feature_importances[name] += importance
 
-            # Filter data to top features
-            refined_data = result['X'][top_features].copy()
+            refined_data = data[top_features].copy()                            
             refined_data['Label'] = result['y']
 
             # Setup with reduced features
@@ -186,22 +182,36 @@ class MLWorker(QThread):
                     explainer = shap.Explainer(blended)
                     shap_values = explainer(X)
                     shap_X = X
-                except Exception as tree_error:
+                except Exception:
                     # Fallback for non-tree models
-                    background = shap.utils.sample(X, 100)
+                    background = shap.utils.sample(X, min(100, len(X) * 2), random_state=RANDOM_STATE)
                     explainer = shap.KernelExplainer(blended.predict, background)
 
-                    shap_X = X.sample(100)
+                    shap_X = X.sample(min(100, len(X)))
                     shap_values = explainer.shap_values(shap_X)
 
                 plt.figure()
                 shap.summary_plot(shap_values, shap_X, show=False)
                 plt.tight_layout()
-                plt.savefig(os.path.join(shap_output_path, "shap_summary.png"), dpi=300)
+                plt.savefig(os.path.join(shap_output_path, f"{gene}_shap_summary.png"), dpi=300)
                 plt.close()
-
+            
             except Exception as shap_error:
                 print(f"⚠️ Could not generate SHAP summaries for {model_path}: {shap_error}")
+
+            # Generate and save correlation heatmap
+            try:
+                corr = refined_data.drop(columns=["Label"]).corr()
+                num_features = corr.shape[0]
+                plt.figure(figsize=(max(10, num_features), max(8, num_features)))
+                sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm", square=True, cbar_kws={"shrink": 0.75})
+                plt.title(f"Feature Correlation Heatmap for {gene}", fontsize=10)
+                plt.tight_layout()
+                
+                plt.savefig(os.path.join(shap_output_path, f"{gene}_heatmap.png"), dpi=300)
+                plt.close()
+            except Exception as heatmap_error:
+                print(f"⚠️ Could not generate correlation heatmap for {gene}: {heatmap_error}")
 
 
         self.save_metrics(
