@@ -75,7 +75,7 @@ class MLWorker(QThread):
         return {"X": X, "y": y, "file_name": processed_file}
 
     def setup_data(self, data):
-        return setup(data, target='Label', session_id=RANDOM_STATE, verbose=False, remove_multicollinearity=True, multicollinearity_threshold=0.85)
+        return setup(data, target='Label', session_id=RANDOM_STATE, verbose=False, remove_multicollinearity=True, multicollinearity_threshold=0.80)
 
     def tune_and_blend_models(self, models):
         tuned_models = [
@@ -125,6 +125,7 @@ class MLWorker(QThread):
                 if hasattr(model, "feature_importances_"):
                     feature_names = model.feature_names_in_
                     importances = model.feature_importances_
+
                     if len(importances) == len(feature_names):
                         temp_df = pd.DataFrame({"Feature": feature_names, "Importance": importances})
                         importance_df = pd.concat([importance_df, temp_df])
@@ -172,7 +173,6 @@ class MLWorker(QThread):
             # Generate and save SHAP values and plots
             try:
                 X = get_config("X")
-                y = get_config("y")
 
                 shap_output_path = os.path.join(model_path + "_shap_outputs")
                 os.makedirs(shap_output_path, exist_ok=True)
@@ -189,13 +189,28 @@ class MLWorker(QThread):
 
                     shap_X = X.sample(min(100, len(X)))
                     shap_values = explainer.shap_values(shap_X)
-
+            
+                # Save SHAP summary plot
                 plt.figure()
                 shap.summary_plot(shap_values, shap_X, show=False)
                 plt.tight_layout()
                 plt.savefig(os.path.join(shap_output_path, f"{gene}_shap_summary.png"), dpi=300)
                 plt.close()
-            
+
+                # Save feature value ranges for interpretation
+                value_stats = []
+                for col in shap_X.columns:
+                    values = shap_X[col]
+                    value_stats.append({
+                        "Feature": col,
+                        "Min": round(values.min(), 5),
+                        "Median": round(values.median(), 5),
+                        "Max": round(values.max(), 5)
+                    })
+
+                value_stats_df = pd.DataFrame(value_stats)
+                value_stats_df.to_csv(os.path.join(shap_output_path, f"{gene}_feature_ranges.csv"), index=False)
+
             except Exception as shap_error:
                 print(f"⚠️ Could not generate SHAP summaries for {model_path}: {shap_error}")
 

@@ -6,6 +6,10 @@ import numpy as np
 import rdkit.Chem as Chem
 import rdkit.Chem.FilterCatalog as FilterCatalog
 from rdkit.Chem.Scaffolds import MurckoScaffold
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from rdkit.Chem import rdMolDescriptors
+from sklearn.decomposition import PCA
 
 class MLFolderFinder:
     def __init__(self, target_folder="cancerResearch"):
@@ -35,8 +39,8 @@ class MLFolderFinder:
 
 # Constants
 FIXED_COLUMNS = ["Drug", "Pearson_Correlation", "smiles"]  # Columns to validate CSV structure
-DROPPED_COLUMNS = ["ExactMolWt", "Phi", "NumValenceElectrons", "MaxAbsPartialCharge", "MaxEStateIndex", "MaxPartialCharge", "MinAbsEStateIndex", "MinAbsPartialCharge", "MinEStateIndex", "MinPartialCharge", "MolMR", "NumRadicalElectrons", "NumUnspecifiedAtomStereoCenters", "NumValenceElectrons", "fr_Ndealkylation1", "fr_Ndealkylation2", "fr_allylic_oxid", "fr_azide", "fr_azo", "fr_barbitur", "fr_diazo", "fr_epoxide", "fr_isocyan", "fr_isothiocyan", "fr_nitrile", "fr_nitro", "fr_nitro_arom", "fr_nitro_arom_nonothro", "fr_nitroso", "qed", "Ipc", "AvgIpc"]  # Columns to drop from properties
-DROPPED_PREFIXES = []
+DROPPED_COLUMNS = ["ExactMolWt", "Phi", "NumValenceElectrons", "MaxAbsPartialCharge", "MaxEStateIndex", "MaxAbsEStateIndex", "MaxPartialCharge", "MinAbsEStateIndex", "MinAbsPartialCharge", "MinEStateIndex", "MinPartialCharge", "MolMR", "NumRadicalElectrons", "NumUnspecifiedAtomStereoCenters", "NumValenceElectrons", "fr_Ndealkylation1", "fr_Ndealkylation2", "fr_allylic_oxid", "fr_azide", "fr_azo", "fr_barbitur", "fr_diazo", "fr_epoxide", "fr_isocyan", "fr_isothiocyan", "fr_nitrile", "fr_nitro", "fr_nitro_arom", "fr_nitro_arom_nonothro", "fr_nitroso", "qed", "Ipc", "AvgIpc", "BalabanJ", "BertzCT", "HallKierAlpha"]  # Columns to drop from properties
+DROPPED_PREFIXES = ["BCUT2D_", "Chi", "EState_VSA", "FpDensityMorgan", "PEOE_VSA", "SMR_VSA", "VSA_EState"]
 CUTOFF_PERCENT = 0.025  # Percentage of top and bottom data to select
 
 # Directories
@@ -47,12 +51,30 @@ os.makedirs(output_folder, exist_ok=True)  # Ensure output directory exists
 
 # Labels for readability of AUTOCORR columns
 property_blocks = [
-    ("Mass", 1, 32),
-    ("VDWVolume", 33, 64),
-    ("Electronegativity", 65, 96),
-    ("Polarizability", 97, 128),
-    ("IonPotential", 129, 160),
-    ("EState", 161, 192),
+    ("GasteigerPartialCharge", 1, 8),
+    ("Electronegativity", 9, 16),
+    ("CovalentRadius", 17, 24),
+    ("VDWRadius", 25, 32),
+    ("AtomicMass", 33, 40),
+    ("Polarizability", 41, 48),
+    ("IonizationPotential", 49, 56),
+    ("ElectronAffinity", 57, 64),
+    ("Hardness", 65, 72),
+    ("Softness", 73, 80),
+    ("Electrophilicity", 81, 88),
+    ("NMRShieldingConstant", 89, 96),
+    ("EStateRelatedIndex1", 97, 104),
+    ("EStateRelatedIndex2", 105, 112),
+    ("EStateRelatedIndex3", 113, 120),
+    ("EStateRelatedIndex4", 121, 128),
+    ("EStateRelatedIndex5", 129, 136),
+    ("FormalCharge", 137, 144),
+    ("HBondDonors", 145, 152),
+    ("HBondAcceptors", 153, 160),
+    ("Aromaticity", 161, 168),
+    ("PiElectronCount", 169, 176),
+    ("Lipophilicity", 177, 184),
+    ("MolarRefractivity", 185, 192),
 ]
 
 # Labels for readability of Kappa columns
@@ -189,17 +211,25 @@ class MLFileCleaner:
                     smiles_list = processed_df["smiles"].dropna().tolist().copy()
 
                     # Get the dominant Bemis–Murcko scaffold
-                    dominant_scaffold = get_dominant_scaffold(smiles_list)
+                    dominant_scaffolds = get_frequent_scaffolds(smiles_list)
 
-                    # If found, apply as binary feature and save to file
-                    if dominant_scaffold:
-                        processed_df["has_dominant_scaffold"] = processed_df["smiles"].apply(
-                            lambda sm: has_scaffold(sm, dominant_scaffold)
-                        )
+                    for idx, scaffold in enumerate(dominant_scaffolds):
+                        processed_df[f"fr_scaffold_{idx}"] = processed_df["smiles"].apply(lambda sm: has_scaffold(sm, scaffold))
 
-                        # Save the scaffold SMILES string to a file
-                        with open(os.path.join(output_folder, f"{csv_file}_dominant_scaffold.smiles.txt"), "w") as f:
-                            f.write(dominant_scaffold)
+                    # Save the scaffold SMILES string to a file
+                    with open(os.path.join(output_folder, f"{csv_file}_dominant_scaffold.smiles.txt"), "w") as f:
+                        for scaffold in dominant_scaffolds:
+                            f.write(f'{scaffold} \n')
+
+                    # Calc AUTOCORR3D values
+                    autocorr3d_data = smiles_subset.apply(get_autocorr3d).tolist()
+                    autocorr3d_df = pd.DataFrame(autocorr3d_data, index=processed_df.index)
+                    autocorr3d_df.columns = [f"AUTOCORR3D_{i}" for i in range(1, 1 + autocorr3d_df.shape[1])]
+                    processed_df = pd.concat([processed_df, autocorr3d_df], axis=1)
+
+                    # Calc planarity score and drop drugs where NaN to allow ML models to run
+                    processed_df["planarity_score"] = smiles_subset.apply(planarity_score)
+                    processed_df = processed_df.dropna(subset=["planarity_score"])
 
                 columns_to_keep = ["PAINS_Filter_Pass", "has_dominant_scaffold"]
 
@@ -347,7 +377,8 @@ def rule_of_three_violations(row):
 
     return violations
 
-def get_dominant_scaffold(smiles_list):
+# Returns a list of scaffolds that 2 or more molecules share
+def get_frequent_scaffolds(smiles_list, min_count=2):
     scaffolds = []
     for sm in smiles_list:
         mol = Chem.MolFromSmiles(sm)
@@ -355,18 +386,55 @@ def get_dominant_scaffold(smiles_list):
             scaffold = MurckoScaffold.GetScaffoldForMol(mol)
             if scaffold:
                 scaffold_smiles = Chem.MolToSmiles(scaffold, isomericSmiles=True)
-                scaffolds.append(scaffold_smiles)
+                if scaffold_smiles.strip():  # This ensures the SMILES string is not empty
+                    scaffolds.append(scaffold_smiles)
 
     if not scaffolds:
-        return None
+        return []
 
-    # Count frequency of each scaffold
     scaffold_counts = Counter(scaffolds)
-    most_common_scaffold, _ = scaffold_counts.most_common(1)[0]
+    frequent_scaffolds = [smi for smi, count in scaffold_counts.items() if count >= min_count]
 
-    return most_common_scaffold
+    return frequent_scaffolds
 
 def has_scaffold(smiles, scaffold_smarts):
     mol = Chem.MolFromSmiles(smiles)
     scaffold = Chem.MolFromSmiles(scaffold_smarts)
-    return int(mol.HasSubstructMatch(scaffold)) if mol and scaffold else 0
+
+    if mol and scaffold:
+        return len(mol.GetSubstructMatches(scaffold))
+    else:
+        return 0
+    
+def planarity_score(smiles):
+    mol = Chem.MolFromSmiles(smiles)
+
+    if mol is None:
+        return np.NaN
+
+    try:
+        mol = Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol, AllChem.ETKDG()) # Generate 3D coordinates
+        AllChem.UFFOptimizeMolecule(mol)
+    except:
+        return np.NaN
+
+    conf = mol.GetConformer()
+    coords = np.array([list(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())])
+
+    pca = PCA(n_components=3)
+    pca.fit(coords)
+
+    planarity_score = pca.explained_variance_ratio_[2]
+
+    return float(planarity_score)
+
+def get_autocorr3d(smiles):
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        mol = Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol, AllChem.ETKDG())
+        AllChem.UFFOptimizeMolecule(mol)
+        return list(rdMolDescriptors.CalcAUTOCORR3D(mol))
+    except:
+        return [np.nan] * 80  # Adjust if RDKit returns a different length
