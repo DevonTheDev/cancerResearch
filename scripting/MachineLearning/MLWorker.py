@@ -117,7 +117,7 @@ class MLWorker(QThread):
 
             # Initial setup and comparison
             self.setup_data(data)
-            best_models = compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, n_select=NUMBER_OF_MODELS, turbo=False, exclude=["knn", "ada", "qda"])
+            best_models = compare_models(sort="Accuracy", fold=NUMBER_OF_FOLDS, n_select=NUMBER_OF_MODELS, turbo=False, exclude=["knn"])
 
             # Collect feature importances
             importance_df = pd.DataFrame()
@@ -164,11 +164,11 @@ class MLWorker(QThread):
             # Tune and blend models on reduced features
             blended = self.tune_and_blend_models(best_models)
             score = pull()
-            accuracy = float(score.iloc[NUMBER_OF_FOLDS, 1])
+            accuracy = float(score.iloc[NUMBER_OF_FOLDS, 0])
 
             # Save everything
             save_model(blended, model_path)
-            self.save_metrics(model_path + "_independent_metrics.json", {"accuracy": accuracy, "top_features": importance_df.iloc[:num_features].to_json(orient="records")})
+            self.save_metrics(model_path + "_independent_metrics.json", {"accuracy": accuracy})
 
             # Generate and save SHAP values and plots
             try:
@@ -184,10 +184,10 @@ class MLWorker(QThread):
                     shap_X = X
                 except Exception:
                     # Fallback for non-tree models
-                    background = shap.utils.sample(X, min(100, len(X) * 2), random_state=RANDOM_STATE)
+                    background = shap.utils.sample(X, min(50, len(X) * 2), random_state=RANDOM_STATE)
                     explainer = shap.KernelExplainer(blended.predict, background)
 
-                    shap_X = X.sample(min(100, len(X)))
+                    shap_X = X.sample(min(50, len(X) * 2))
                     shap_values = explainer.shap_values(shap_X)
             
                 # Save SHAP summary plot

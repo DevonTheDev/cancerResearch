@@ -231,7 +231,7 @@ class MLFileCleaner:
                     processed_df["planarity_score"] = smiles_subset.apply(planarity_score)
                     processed_df = processed_df.dropna(subset=["planarity_score"])
 
-                columns_to_keep = ["PAINS_Filter_Pass", "has_dominant_scaffold"]
+                columns_to_keep = ["PAINS_Filter_Pass"]
 
                 label_col = processed_df["Label"]
                 early_cols = processed_df.iloc[:, :3]
@@ -425,7 +425,7 @@ def planarity_score(smiles):
     pca = PCA(n_components=3)
     pca.fit(coords)
 
-    planarity_score = pca.explained_variance_ratio_[2]
+    planarity_score = pca.explained_variance_ratio_[2] # Get Z-axis of PCA graph
 
     return float(planarity_score)
 
